@@ -12,6 +12,7 @@ from src.engine.dcf import (
     discount_cash_flows,
     going_in_cap_rate,
 )
+from src.engine.transfer_tax import calculate_transfer_tax_amount
 from src.engine.types import AnnualPropertyCashFlow, ValuationParams
 
 
@@ -20,6 +21,8 @@ def make_params(
     exit_cap_rate: float = 0.065,
     exit_cap_year: int = -1,
     exit_costs_pct: float = 0.02,
+    transfer_tax_preset: str = "none",
+    transfer_tax_custom_rate: float | None = None,
     cap_reserves: float = 0.25,
     total_area: float = 10000,
 ) -> ValuationParams:
@@ -36,6 +39,11 @@ def make_params(
         amortization_months=None,
         loan_term_months=None,
         io_period_months=0,
+        transfer_tax_preset=transfer_tax_preset,
+        transfer_tax_custom_rate=(
+            Decimal(str(transfer_tax_custom_rate))
+            if transfer_tax_custom_rate is not None else None
+        ),
     )
 
 
@@ -91,6 +99,38 @@ class TestTerminalValue:
         tv = calculate_terminal_value(cfs, params)
         expected = Decimal(str(nois[4])) / Decimal("0.065")
         assert abs(tv - expected) < Decimal("100")
+
+    def test_terminal_value_applies_transfer_tax(self):
+        cfs = make_annual_cfs([1_000_000] * 10)
+        params = make_params(
+            exit_cap_rate=0.065,
+            exit_costs_pct=0.02,
+            transfer_tax_preset="custom_rate",
+            transfer_tax_custom_rate=0.01,
+        )
+
+        tv = calculate_terminal_value(cfs, params, forward_year_noi=Decimal("1000000"))
+        gross = Decimal("1000000") / Decimal("0.065")
+        expected = gross - gross * Decimal("0.02") - gross * Decimal("0.01")
+        assert abs(tv - expected) < Decimal("10")
+
+
+class TestTransferTaxPresets:
+    def test_la_city_ula_uses_higher_tier_over_106m(self):
+        gross = Decimal("11000000")
+        tax = calculate_transfer_tax_amount(gross, "la_city_ula")
+        expected = gross * Decimal("0.0595")  # 0.45% city + 5.5% ULA
+        assert abs(tax - expected) < Decimal("0.01")
+
+    def test_wa_reet_is_marginal(self):
+        gross = Decimal("2000000")
+        tax = calculate_transfer_tax_amount(gross, "wa_state_reet")
+        expected = (
+            Decimal("525000") * Decimal("0.011")
+            + Decimal("1000000") * Decimal("0.0128")
+            + Decimal("475000") * Decimal("0.0275")
+        )
+        assert abs(tax - expected) < Decimal("0.01")
 
 
 class TestDiscounting:

@@ -27,6 +27,8 @@ class Valuation(Base, UUIDPrimaryKey, TimestampMixin):
     # Which year's NOI to capitalize: -1 = forward year (last + 1), or specific year number
     exit_cap_applied_to_year: Mapped[int] = mapped_column(Integer, default=-1)
     exit_costs_pct: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal("0.02"))
+    transfer_tax_preset: Mapped[str] = mapped_column(String(64), default="none")
+    transfer_tax_custom_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     capital_reserves_per_unit: Mapped[Decimal] = mapped_column(
         Numeric(18, 6), default=Decimal("0.25")
     )  # $/SF/yr or $/unit/yr
@@ -45,6 +47,11 @@ class Valuation(Base, UUIDPrimaryKey, TimestampMixin):
     result_going_in_cap_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     result_exit_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     result_equity_multiple: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    result_terminal_noi_basis: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    result_terminal_gross_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    result_terminal_exit_costs_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    result_terminal_transfer_tax_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    result_terminal_transfer_tax_preset: Mapped[str | None] = mapped_column(String(64))
     result_cash_flows_json: Mapped[str | None] = mapped_column(Text)  # JSON blob
     result_tenant_cash_flows_json: Mapped[str | None] = mapped_column(Text)  # JSON blob
 

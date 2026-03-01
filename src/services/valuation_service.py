@@ -117,6 +117,11 @@ class ValuationService:
             valuation.result_going_in_cap_rate = result.going_in_cap_rate
             valuation.result_exit_value = result.terminal_value
             valuation.result_equity_multiple = result.equity_multiple
+            valuation.result_terminal_noi_basis = result.terminal_noi_basis
+            valuation.result_terminal_gross_value = result.terminal_gross_value
+            valuation.result_terminal_exit_costs_amount = result.terminal_exit_costs_amount
+            valuation.result_terminal_transfer_tax_amount = result.terminal_transfer_tax_amount
+            valuation.result_terminal_transfer_tax_preset = result.terminal_transfer_tax_preset
             valuation.result_cash_flows_json = json.dumps(
                 [self._serialize_annual_cf(cf) for cf in result.annual_cash_flows]
             )
@@ -407,6 +412,8 @@ class ValuationService:
             exit_cap_rate=v.exit_cap_rate,
             exit_cap_year=v.exit_cap_applied_to_year,
             exit_costs_pct=v.exit_costs_pct,
+            transfer_tax_preset=v.transfer_tax_preset or "none",
+            transfer_tax_custom_rate=v.transfer_tax_custom_rate,
             capital_reserves_per_unit=v.capital_reserves_per_unit,
             total_property_area=p.total_area,
             use_mid_year_convention=v.use_mid_year_convention,
@@ -520,6 +527,11 @@ class ValuationService:
             equity_multiple=result.equity_multiple,
             avg_occupancy_pct=result.avg_occupancy_pct,
             weighted_avg_lease_term_years=walt,
+            terminal_noi_basis=result.terminal_noi_basis,
+            terminal_gross_value=result.terminal_gross_value,
+            terminal_exit_costs_amount=result.terminal_exit_costs_amount,
+            terminal_transfer_tax_amount=result.terminal_transfer_tax_amount,
+            terminal_transfer_tax_preset=result.terminal_transfer_tax_preset,
             year1_gpi=y1.gross_potential_income if y1 else Decimal(0),
             year1_egi=y1.effective_gross_income if y1 else Decimal(0),
             year1_noi=y1.net_operating_income if y1 else Decimal(0),
@@ -543,6 +555,11 @@ class ValuationService:
             equity_multiple=valuation.result_equity_multiple,
             avg_occupancy_pct=Decimal(0),
             weighted_avg_lease_term_years=None,
+            terminal_noi_basis=valuation.result_terminal_noi_basis,
+            terminal_gross_value=valuation.result_terminal_gross_value,
+            terminal_exit_costs_amount=valuation.result_terminal_exit_costs_amount,
+            terminal_transfer_tax_amount=valuation.result_terminal_transfer_tax_amount,
+            terminal_transfer_tax_preset=valuation.result_terminal_transfer_tax_preset,
             year1_gpi=Decimal(y1.gross_potential_income) if y1 else Decimal(0),
             year1_egi=Decimal(y1.effective_gross_income) if y1 else Decimal(0),
             year1_noi=Decimal(y1.net_operating_income) if y1 else Decimal(0),

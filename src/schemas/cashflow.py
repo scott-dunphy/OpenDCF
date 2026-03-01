@@ -103,6 +103,13 @@ class KeyMetricsSummary(BaseModel):
     avg_occupancy_pct: Decimal
     weighted_avg_lease_term_years: Decimal | None
 
+    # Reversion breakdown
+    terminal_noi_basis: Decimal | None = None
+    terminal_gross_value: Decimal | None = None
+    terminal_exit_costs_amount: Decimal | None = None
+    terminal_transfer_tax_amount: Decimal | None = None
+    terminal_transfer_tax_preset: str | None = None
+
     # Year 1 metrics
     year1_gpi: Decimal
     year1_egi: Decimal

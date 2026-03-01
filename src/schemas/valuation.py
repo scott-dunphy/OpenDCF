@@ -17,6 +17,11 @@ class ValuationBase(BaseModel):
         description="-1 = forward year NOI (Hold Period + 1), or specific analysis year number"
     )
     exit_costs_pct: Decimal = Field(default=Decimal("0.02"), ge=0, lt=1)
+    transfer_tax_preset: str = Field(
+        default="none",
+        description="Transfer tax preset code (none, custom_rate, la_city_ula, etc.)",
+    )
+    transfer_tax_custom_rate: Decimal | None = Field(default=None, ge=0, lt=1)
     capital_reserves_per_unit: Decimal = Field(
         default=Decimal("0.25"), ge=0,
         description="$/SF/yr or $/unit/yr capital reserves"
@@ -40,6 +45,7 @@ class ValuationCreate(ValuationBase):
                 "exit_cap_rate": "0.065",
                 "exit_cap_applied_to_year": -1,
                 "exit_costs_pct": "0.02",
+                "transfer_tax_preset": "none",
                 "capital_reserves_per_unit": "0.25",
                 "use_mid_year_convention": False,
             }
@@ -55,6 +61,8 @@ class ValuationUpdate(BaseModel):
     exit_cap_rate: Decimal | None = Field(default=None, gt=0, lt=1)
     exit_cap_applied_to_year: int | None = None
     exit_costs_pct: Decimal | None = Field(default=None, ge=0, lt=1)
+    transfer_tax_preset: str | None = None
+    transfer_tax_custom_rate: Decimal | None = Field(default=None, ge=0, lt=1)
     capital_reserves_per_unit: Decimal | None = Field(default=None, ge=0)
     use_mid_year_convention: bool | None = None
     loan_amount: Decimal | None = None

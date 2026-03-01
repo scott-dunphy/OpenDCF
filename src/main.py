@@ -57,6 +57,7 @@ async def health() -> dict:
 @app.get("/api/v1/enums", tags=["metadata"])
 async def get_enums() -> dict:
     """Return all enum values for UI dropdowns."""
+    from src.engine.transfer_tax import transfer_tax_presets_metadata
     from src.schemas.common import (
         AreaUnit, EscalationType, ExpenseCategoryEnum,
         LeaseType, PropertyType, RecoveryType, ValuationStatus,
@@ -69,6 +70,7 @@ async def get_enums() -> dict:
         "expense_categories": [e.value for e in ExpenseCategoryEnum],
         "lease_types": [e.value for e in LeaseType],
         "valuation_statuses": [e.value for e in ValuationStatus],
+        "transfer_tax_presets": transfer_tax_presets_metadata(),
     }
 
 

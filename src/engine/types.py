@@ -154,6 +154,17 @@ class ValuationParams:
     amortization_months: int | None
     loan_term_months: int | None
     io_period_months: int
+    transfer_tax_preset: str = "none"
+    transfer_tax_custom_rate: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class TerminalValueBreakdown:
+    noi_basis: Decimal
+    gross_value: Decimal
+    exit_costs_amount: Decimal
+    transfer_tax_amount: Decimal
+    net_value: Decimal
 
 
 # =========================================================================
@@ -251,3 +262,8 @@ class EngineResult:
     going_in_cap_rate: Decimal
     avg_occupancy_pct: Decimal
     equity_multiple: Decimal | None
+    terminal_noi_basis: Decimal = Decimal(0)
+    terminal_gross_value: Decimal = Decimal(0)
+    terminal_exit_costs_amount: Decimal = Decimal(0)
+    terminal_transfer_tax_amount: Decimal = Decimal(0)
+    terminal_transfer_tax_preset: str = "none"

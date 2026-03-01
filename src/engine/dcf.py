@@ -4,9 +4,10 @@ All arithmetic uses Decimal for precision.
 """
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
-from src.engine.types import AnnualPropertyCashFlow, ValuationParams
+from src.engine.transfer_tax import calculate_transfer_tax_amount
+from src.engine.types import AnnualPropertyCashFlow, TerminalValueBreakdown, ValuationParams
 
 
 # =========================================================================
@@ -92,13 +93,26 @@ def calculate_terminal_value(
     forward_year_noi: Decimal | None = None,
 ) -> Decimal:
     """
-    Terminal value = NOI / exit_cap_rate * (1 - exit_costs_pct).
+    Terminal value = NOI / exit_cap_rate - exit costs - transfer taxes.
 
     exit_cap_year == -1: use forward year NOI (projected year N+1 NOI).
     exit_cap_year > 0: use that specific year's NOI.
 
     The forward_year_noi argument allows the caller to supply the
     N+1 projected NOI; if None, we use the last year's NOI as a conservative proxy.
+    """
+    return calculate_terminal_value_breakdown(annual_cfs, params, forward_year_noi).net_value
+
+
+def calculate_terminal_value_breakdown(
+    annual_cfs: list[AnnualPropertyCashFlow],
+    params: ValuationParams,
+    forward_year_noi: Decimal | None = None,
+) -> TerminalValueBreakdown:
+    """
+    Build terminal value components:
+      gross = NOI / exit_cap_rate
+      net = gross - exit_costs - transfer_tax
     """
     if params.exit_cap_year == -1:
         noi = forward_year_noi if forward_year_noi is not None else annual_cfs[-1].net_operating_income
@@ -110,11 +124,29 @@ def calculate_terminal_value(
             noi = annual_cfs[-1].net_operating_income
 
     if params.exit_cap_rate == Decimal(0):
-        return Decimal(0)
+        return TerminalValueBreakdown(
+            noi_basis=noi,
+            gross_value=Decimal(0),
+            exit_costs_amount=Decimal(0),
+            transfer_tax_amount=Decimal(0),
+            net_value=Decimal(0),
+        )
 
     gross_value = noi / params.exit_cap_rate
-    net_value = gross_value * (Decimal(1) - params.exit_costs_pct)
-    return net_value
+    exit_costs = gross_value * params.exit_costs_pct
+    transfer_tax = calculate_transfer_tax_amount(
+        gross_sale_price=gross_value,
+        preset_code=params.transfer_tax_preset,
+        custom_rate=params.transfer_tax_custom_rate,
+    )
+    net_value = gross_value - exit_costs - transfer_tax
+    return TerminalValueBreakdown(
+        noi_basis=noi,
+        gross_value=gross_value,
+        exit_costs_amount=exit_costs,
+        transfer_tax_amount=transfer_tax,
+        net_value=net_value,
+    )
 
 
 # =========================================================================

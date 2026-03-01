@@ -543,20 +543,39 @@ const PROPERTY_FIELDS = [
     { key: 'comment', label: 'Comment / Source Note', type: 'textarea' },
 ];
 
-function buildSuiteFields(marketProfiles, areaUnit) {
+function buildSuiteFields(marketProfiles, areaUnit, simplifyUnitAssumptions = false) {
     const areaFieldLabel = areaUnit === 'unit' ? 'Unit Count' : 'Area (SF)';
     const mlaOptions = [
         { value: '', label: '— Auto (match by space type) —' },
         ...(marketProfiles || []).map(m => ({ value: m.id, label: `${fmt.typeLabel(m.space_type)} — ${fmt.perSf(m.market_rent_per_unit, areaUnit)}` }))
     ];
-    return [
+    const fields = [
         { key: 'suite_name', label: 'Suite Name', type: 'text', required: true },
         { key: 'area', label: areaFieldLabel, type: 'number', required: true, step: '1', half: true },
-        { key: 'space_type', label: 'Space Type', type: 'text', required: true, half: true, helpText: 'e.g., office, retail, industrial' },
+        {
+            key: 'space_type',
+            label: 'Space Type',
+            type: 'text',
+            required: true,
+            half: true,
+            helpText: simplifyUnitAssumptions
+                ? 'Unit type key used by rent roll assumptions (e.g., studio, 1br, climate_5x10).'
+                : 'e.g., office, retail, industrial'
+        },
         { key: 'floor', label: 'Floor', type: 'number', step: '1', half: true },
-        { key: 'market_leasing_profile_id', label: 'Market Leasing Profile', type: 'select', options: mlaOptions, half: true, helpText: 'Assign MLA for renewal/new-tenant modeling' },
-        { key: 'comment', label: 'Comment / Source Note', type: 'textarea' },
     ];
+    if (!simplifyUnitAssumptions) {
+        fields.push({
+            key: 'market_leasing_profile_id',
+            label: 'Market Leasing Profile',
+            type: 'select',
+            options: mlaOptions,
+            half: true,
+            helpText: 'Assign MLA for renewal/new-tenant modeling',
+        });
+    }
+    fields.push({ key: 'comment', label: 'Comment / Source Note', type: 'textarea' });
+    return fields;
 }
 
 const TENANT_FIELDS = [
@@ -784,7 +803,7 @@ function openUnitMarketQuickSetup(propertyId, property, marketProfiles) {
     });
 
     showFormModal({
-        title: 'Quick Setup: Unit-Type Market Assumptions',
+        title: 'Rent Roll Assumptions: Multifamily / Self-Storage',
         fields,
         wide: true,
         onSubmit: async (data, overlay) => {
@@ -831,7 +850,7 @@ function openUnitMarketQuickSetup(propertyId, property, marketProfiles) {
                 }
             }
             overlay.remove();
-            toast('Unit-type market assumptions updated', 'success');
+            toast('Rent roll assumptions updated', 'success');
             propertyView({ id: propertyId });
         }
     });
@@ -888,6 +907,32 @@ const VALUATION_FIELDS = [
     { key: 'discount_rate', label: 'Discount Rate', type: 'number', required: true, step: '0.0025', default: 0.08, half: true, helpText: 'Enter percent' },
     { key: 'exit_cap_rate', label: 'Exit Cap Rate', type: 'number', required: true, step: '0.0025', default: 0.065, half: true, helpText: 'Enter percent' },
     { key: 'exit_costs_pct', label: 'Exit Costs %', type: 'number', step: '0.005', default: 0.02, half: true, helpText: 'Enter percent' },
+    {
+        key: 'transfer_tax_preset',
+        label: 'Transfer Tax Preset',
+        type: 'select',
+        default: 'none',
+        half: true,
+        options: [
+            { value: 'none', label: 'None' },
+            { value: 'custom_rate', label: 'Custom Flat Rate' },
+            { value: 'la_city_ula', label: 'Los Angeles: City + ULA' },
+            { value: 'san_francisco_transfer', label: 'San Francisco Transfer Tax' },
+            { value: 'nyc_nys_commercial', label: 'NYC + NYS Commercial' },
+            { value: 'philadelphia_realty_transfer', label: 'Philadelphia Realty Transfer' },
+            { value: 'dc_deed_transfer_recordation', label: 'Washington, DC Deed Taxes' },
+            { value: 'wa_state_reet', label: 'Washington State REET' },
+        ],
+    },
+    {
+        key: 'transfer_tax_custom_rate',
+        label: 'Custom Transfer Tax %',
+        type: 'number',
+        step: '0.0025',
+        half: true,
+        helpText: 'Used when preset is Custom Flat Rate.',
+        visibleWhen: v => v.transfer_tax_preset === 'custom_rate',
+    },
     { key: 'capital_reserves_per_unit', label: 'Capital Reserves $/SF/yr', type: 'number', step: '0.05', default: 0.25, half: true },
     { key: 'exit_cap_applied_to_year', label: 'Exit Cap Applied to Year', type: 'number', step: '1', default: -1, half: true, helpText: '-1 = forward year (Hold + 1 NOI)' },
     { key: 'use_mid_year_convention', label: 'Use mid-year discounting', type: 'checkbox', default: false },
@@ -1476,6 +1521,7 @@ async function propertyView({ id }) {
     }));
 
     const location = [property.address_line1, property.city, property.state, property.zip_code].filter(Boolean).join(', ');
+    const simplifyUnitAssumptions = property.property_type === 'multifamily' || property.property_type === 'self_storage';
     const totalArea = parseFloat(property.total_area);
     const occupiedArea = property.suites.reduce((sum, s) => {
         const hasLease = (leasesBySuite[s.id] || []).some(l => l.lease_type !== 'market');
@@ -1533,7 +1579,7 @@ async function propertyView({ id }) {
             <button class="tab-item active" data-tab="rent-roll">Rent Roll</button>
             <button class="tab-item" data-tab="expenses">Expenses</button>
             <button class="tab-item" data-tab="other-income">Other Income</button>
-            <button class="tab-item" data-tab="market">Market Profiles</button>
+            ${simplifyUnitAssumptions ? '' : '<button class="tab-item" data-tab="market">Market Profiles</button>'}
             <button class="tab-item" data-tab="capital">Capital Projects</button>
             <button class="tab-item" data-tab="recovery">Recovery Structures</button>
             <button class="tab-item" data-tab="valuations">Valuations</button>
@@ -1548,9 +1594,9 @@ async function propertyView({ id }) {
         <div class="tab-content" id="tab-other-income">
             ${renderOtherIncomeTab(otherIncomeItems)}
         </div>
-        <div class="tab-content" id="tab-market">
+        ${simplifyUnitAssumptions ? '' : `<div class="tab-content" id="tab-market">
             ${renderMarketTab(marketProfiles, property)}
-        </div>
+        </div>`}
         <div class="tab-content" id="tab-capital">
             ${renderCapitalProjectsTab(capitalProjects, id)}
         </div>
@@ -1568,7 +1614,8 @@ async function propertyView({ id }) {
         document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         tab.classList.add('active');
-        document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+        const content = document.getElementById('tab-' + tab.dataset.tab);
+        if (content) content.classList.add('active');
     });
 
     // Run valuation button
@@ -1648,7 +1695,7 @@ async function propertyView({ id }) {
         newSuiteBtn.addEventListener('click', () => {
             showFormModal({
                 title: 'New Suite',
-                fields: buildSuiteFields(marketProfiles, property.area_unit),
+                fields: buildSuiteFields(marketProfiles, property.area_unit, simplifyUnitAssumptions),
                 onSubmit: async (data, overlay) => {
                     if (!data.market_leasing_profile_id) delete data.market_leasing_profile_id;
                     await api.post(`/properties/${id}/suites`, data);
@@ -1668,7 +1715,7 @@ async function propertyView({ id }) {
             const suite = property.suites.find(s => s.id === sid);
             showFormModal({
                 title: 'Edit Suite',
-                fields: buildSuiteFields(marketProfiles, property.area_unit),
+                fields: buildSuiteFields(marketProfiles, property.area_unit, simplifyUnitAssumptions),
                 initialValues: suite,
                 onSubmit: async (data, overlay) => {
                     await api.put(`/properties/${id}/suites/${sid}`, data);
@@ -2121,6 +2168,7 @@ function renderRentRollTab(property, allLeases, marketProfiles) {
     (marketProfiles || []).forEach(m => { mlaByType[m.space_type] = m; });
     const au = property.area_unit;
     const isUnit = au === 'unit';
+    const simplifyUnitAssumptions = property.property_type === 'multifamily' || property.property_type === 'self_storage';
     const areaLabel = isUnit ? 'Units' : 'Area (SF)';
     const rentLabel = isUnit ? 'Rent/Unit' : 'Rent/SF';
 
@@ -2213,6 +2261,7 @@ function renderRentRollTab(property, allLeases, marketProfiles) {
                 <button class="btn btn-primary btn-sm" id="newLeaseBtn">${icons.plus} New Lease</button>
             </div>
         </div>
+        ${isUnit && simplifyUnitAssumptions ? '<div class="page-subtitle" style="margin-bottom:10px">Market leasing assumptions are managed directly here in the rent roll for multifamily and self-storage.</div>' : ''}
         <div class="data-table-wrap">
             <table class="data-table">
                 <thead>
@@ -2854,6 +2903,7 @@ async function valuationView({ id }) {
         <div class="cf-table-wrap" id="cfTableWrap">
             ${renderCashFlowTable(cf, tenants, marketProfiles, property ? property.area_unit : 'sf')}
         </div>
+        ${renderReversionValueSection(valuation, km, cf)}
     `;
 
     // Render charts
@@ -2879,6 +2929,172 @@ async function valuationView({ id }) {
         el.addEventListener('mouseenter', () => showMlaTip(el, decodeURIComponent(el.dataset.mla)));
         el.addEventListener('mouseleave', hideMlaTip);
     });
+}
+
+function renderReversionValueSection(valuation, keyMetrics, cashFlows) {
+    if (!valuation || !keyMetrics || !cashFlows || cashFlows.length === 0) return '';
+
+    const asNum = (v) => {
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? n : 0;
+    };
+
+    const exitCapRate = asNum(valuation.exit_cap_rate);
+    const exitCostsPct = asNum(valuation.exit_costs_pct);
+    const terminalValue = asNum(keyMetrics.terminal_value);
+    const transferTaxPreset = String(
+        valuation.transfer_tax_preset || keyMetrics.terminal_transfer_tax_preset || 'none'
+    );
+    const transferTaxCustomRate = asNum(valuation.transfer_tax_custom_rate);
+    const holdYear = cashFlows[cashFlows.length - 1].year;
+    const exitYearSetting = Number.isFinite(Number(valuation.exit_cap_applied_to_year))
+        ? Number(valuation.exit_cap_applied_to_year)
+        : -1;
+    const presetLabels = {
+        none: 'None',
+        custom_rate: 'Custom Flat Rate',
+        la_city_ula: 'Los Angeles: City + ULA',
+        san_francisco_transfer: 'San Francisco Transfer Tax',
+        nyc_nys_commercial: 'NYC + NYS Commercial',
+        philadelphia_realty_transfer: 'Philadelphia Realty Transfer',
+        dc_deed_transfer_recordation: 'Washington, DC Deed Taxes',
+        wa_state_reet: 'Washington State REET',
+    };
+    const presetLabel = presetLabels[transferTaxPreset] || fmt.typeLabel(transferTaxPreset);
+    const calcTransferTax = (gross, preset, customRate) => {
+        if (!Number.isFinite(gross) || gross <= 0) return 0;
+        const code = String(preset || 'none').toLowerCase();
+        if (code === 'none') return 0;
+        if (code === 'custom_rate') return gross * Math.max(0, customRate || 0);
+        if (code === 'la_city_ula') {
+            const ula = gross > 10600000 ? 0.055 : (gross > 5300000 ? 0.04 : 0);
+            return gross * (0.0045 + ula);
+        }
+        if (code === 'san_francisco_transfer') {
+            let rate = 0.03;
+            if (gross < 250000) rate = 0.005;
+            else if (gross < 1000000) rate = 0.0068;
+            else if (gross < 5000000) rate = 0.0075;
+            else if (gross < 10000000) rate = 0.0225;
+            else if (gross < 25000000) rate = 0.0275;
+            return gross * rate;
+        }
+        if (code === 'nyc_nys_commercial') {
+            const nyc = gross < 500000 ? 0.01425 : 0.02625;
+            const nys = 0.004 + (gross >= 2000000 ? 0.0025 : 0);
+            return gross * (nyc + nys);
+        }
+        if (code === 'philadelphia_realty_transfer') return gross * 0.04278;
+        if (code === 'dc_deed_transfer_recordation') return gross * (gross < 400000 ? 0.022 : 0.029);
+        if (code === 'wa_state_reet') {
+            let tax = 0;
+            const b1 = 525000;
+            const b2 = 1525000;
+            const b3 = 3025000;
+            if (gross > 0) tax += Math.min(gross, b1) * 0.011;
+            if (gross > b1) tax += (Math.min(gross, b2) - b1) * 0.0128;
+            if (gross > b2) tax += (Math.min(gross, b3) - b2) * 0.0275;
+            if (gross > b3) tax += (gross - b3) * 0.03;
+            return tax;
+        }
+        return 0;
+    };
+
+    let noiBasis = asNum(keyMetrics.terminal_noi_basis);
+    let noiLabel = '';
+    let grossReversion = asNum(keyMetrics.terminal_gross_value);
+    let exitCostsAmount = asNum(keyMetrics.terminal_exit_costs_amount);
+    let transferTaxAmount = asNum(keyMetrics.terminal_transfer_tax_amount);
+    const hasStoredBreakdown =
+        keyMetrics.terminal_gross_value != null &&
+        keyMetrics.terminal_noi_basis != null;
+
+    if (!hasStoredBreakdown) {
+        if (exitYearSetting === -1) {
+            // Engine convention: default terminal value uses forward (Hold+1) NOI.
+            noiLabel = `Year ${holdYear + 1} NOI (Hold + 1)`;
+            const denominator = 1 - exitCostsPct;
+            const grossFromTerminal = denominator > 0 ? terminalValue / denominator : 0;
+            noiBasis = grossFromTerminal * exitCapRate;
+        } else {
+            noiLabel = `Year ${exitYearSetting} NOI`;
+            const selectedYearCf = cashFlows.find((row) => row.year === exitYearSetting);
+            if (selectedYearCf) {
+                noiBasis = asNum(selectedYearCf.net_operating_income);
+            } else {
+                const denominator = 1 - exitCostsPct;
+                const grossFromTerminal = denominator > 0 ? terminalValue / denominator : 0;
+                noiBasis = grossFromTerminal * exitCapRate;
+                noiLabel += ' (derived from terminal value)';
+            }
+        }
+        grossReversion = exitCapRate > 0 ? noiBasis / exitCapRate : 0;
+        exitCostsAmount = grossReversion * exitCostsPct;
+        transferTaxAmount = 0;
+    } else if (exitYearSetting === -1) {
+        noiLabel = `Year ${holdYear + 1} NOI (Hold + 1)`;
+    } else {
+        noiLabel = `Year ${exitYearSetting} NOI`;
+    }
+
+    // Always reflect currently saved valuation assumption immediately, even before re-run.
+    transferTaxAmount = calcTransferTax(grossReversion, transferTaxPreset, transferTaxCustomRate);
+    const netReversion = grossReversion - exitCostsAmount - transferTaxAmount;
+    const calcVariance = terminalValue - netReversion;
+    const transferRate = grossReversion > 0 ? transferTaxAmount / grossReversion : 0;
+
+    return `
+        <div class="section-header" style="margin-top:20px">
+            <h3 class="section-title">Reversion Value Calculation</h3>
+        </div>
+        <div class="data-table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Component</th>
+                        <th>Formula</th>
+                        <th class="right">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>${noiLabel}</td>
+                        <td>NOI basis for sale</td>
+                        <td class="mono right">${fmt.currencyExact(noiBasis)}</td>
+                    </tr>
+                    <tr>
+                        <td>Gross Reversion</td>
+                        <td>${fmt.currencyExact(noiBasis)} / ${fmt.pct(exitCapRate)}</td>
+                        <td class="mono right">${fmt.currencyExact(grossReversion)}</td>
+                    </tr>
+                    <tr>
+                        <td>Less: Exit Costs</td>
+                        <td>${fmt.currencyExact(grossReversion)} × ${fmt.pct(exitCostsPct)}</td>
+                        <td class="mono right negative">-${fmt.currencyExact(exitCostsAmount)}</td>
+                    </tr>
+                    <tr>
+                        <td>Less: Transfer Tax</td>
+                        <td>${presetLabel}${transferTaxAmount > 0 ? ` (${fmt.pct(transferRate)})` : ''}</td>
+                        <td class="mono right negative">-${fmt.currencyExact(transferTaxAmount)}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Net Reversion (Terminal Value)</strong></td>
+                        <td>Gross Reversion − Exit Costs − Transfer Tax</td>
+                        <td class="mono right"><strong>${fmt.currencyExact(netReversion)}</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Model Terminal Value (stored)</td>
+                        <td>From valuation run output</td>
+                        <td class="mono right">${fmt.currencyExact(terminalValue)}</td>
+                    </tr>
+                    <tr>
+                        <td>Calculation Variance</td>
+                        <td>Stored − Recomputed</td>
+                        <td class="mono right ${Math.abs(calcVariance) > 1 ? 'negative' : ''}">${fmt.currencyExact(calcVariance)}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>`;
 }
 
 

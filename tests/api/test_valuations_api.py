@@ -201,3 +201,43 @@ class TestValuationWorkflow:
         assert "property_types" in data
         assert "office" in data["property_types"]
         assert "multifamily" in data["property_types"]
+        assert "transfer_tax_presets" in data
+        codes = [p["code"] for p in data["transfer_tax_presets"]]
+        assert "la_city_ula" in codes
+
+    async def test_valuation_transfer_tax_fields_persist(self, client: AsyncClient):
+        prop = await client.post("/api/v1/properties", json={
+            "name": "Transfer Tax Test Property",
+            "property_type": "office",
+            "total_area": "10000",
+            "area_unit": "sf",
+            "analysis_start_date": "2025-01-01",
+        })
+        assert prop.status_code == 201
+        prop_id = prop.json()["id"]
+
+        created = await client.post(f"/api/v1/properties/{prop_id}/valuations", json={
+            "name": "Transfer Tax Create",
+            "discount_rate": "0.08",
+            "exit_cap_rate": "0.065",
+            "transfer_tax_preset": "la_city_ula",
+        })
+        assert created.status_code == 201
+        val = created.json()
+        assert val["transfer_tax_preset"] == "la_city_ula"
+
+        val_id = val["id"]
+        updated = await client.put(f"/api/v1/valuations/{val_id}", json={
+            "transfer_tax_preset": "custom_rate",
+            "transfer_tax_custom_rate": "0.05",
+        })
+        assert updated.status_code == 200
+        val2 = updated.json()
+        assert val2["transfer_tax_preset"] == "custom_rate"
+        assert float(val2["transfer_tax_custom_rate"]) == pytest.approx(0.05)
+
+        fetched = await client.get(f"/api/v1/valuations/{val_id}")
+        assert fetched.status_code == 200
+        val3 = fetched.json()
+        assert val3["transfer_tax_preset"] == "custom_rate"
+        assert float(val3["transfer_tax_custom_rate"]) == pytest.approx(0.05)

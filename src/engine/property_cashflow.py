@@ -17,7 +17,7 @@ from src.engine.date_utils import add_months, build_analysis_period, end_of_mont
 from src.engine.dcf import (
     build_debt_schedule,
     calculate_irr,
-    calculate_terminal_value,
+    calculate_terminal_value_breakdown,
     discount_cash_flows,
     equity_multiple as _equity_multiple,
     going_in_cap_rate,
@@ -434,7 +434,8 @@ def run_valuation(
         )
         if len(extended.annual_cash_flows) > len(annual_cfs):
             forward_noi = extended.annual_cash_flows[len(annual_cfs)].net_operating_income
-    terminal_value = calculate_terminal_value(annual_cfs, params, forward_noi)
+    terminal = calculate_terminal_value_breakdown(annual_cfs, params, forward_noi)
+    terminal_value = terminal.net_value
 
     # Step 7: DCF discounting → NPV
     pv_cfs, pv_terminal, npv = discount_cash_flows(
@@ -467,4 +468,9 @@ def run_valuation(
         going_in_cap_rate=gin_cap,
         avg_occupancy_pct=avg_occ,
         equity_multiple=em,
+        terminal_noi_basis=terminal.noi_basis,
+        terminal_gross_value=terminal.gross_value,
+        terminal_exit_costs_amount=terminal.exit_costs_amount,
+        terminal_transfer_tax_amount=terminal.transfer_tax_amount,
+        terminal_transfer_tax_preset=params.transfer_tax_preset,
     )
