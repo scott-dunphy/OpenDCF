@@ -97,5 +97,4 @@ pytest tests/api/
 ## Documentation
 
 - Architecture: `ARCHITECTURE.md`
-- Full endpoint reference: `.claude/skills/ares-valuation/references/api-reference.md`
-
+- Full endpoint reference: `.claude/skills/opendcf-valuation/references/api-reference.md`

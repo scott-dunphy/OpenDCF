@@ -58,20 +58,21 @@ Build the property in this order (each step depends on IDs from previous steps):
 
 ```
 1. POST /api/v1/properties                              → property_id
-2. POST /api/v1/properties/{pid}/suites (for each)      → suite_ids
+2. POST /api/v1/properties/{property_id}/suites (for each)      → suite_ids
 3. POST /api/v1/tenants (for each unique tenant)        → tenant_ids
-4. POST /api/v1/suites/{sid}/leases (for each)          → lease_ids
-   - Optional: POST /leases/{lid}/rent-steps
-   - Optional: POST /leases/{lid}/free-rent-periods
-5. POST /api/v1/properties/{pid}/expenses (for each)
-6. POST /api/v1/properties/{pid}/other-income (optional custom revenue lines)
-7. POST /api/v1/properties/{pid}/market-profiles (for each space type)
-8. POST /api/v1/properties/{pid}/capital-projects (if any)
-9. POST /api/v1/properties/{pid}/valuations             → valuation_id
-10. POST /api/v1/valuations/{vid}/run                   → full results
+4. POST /api/v1/suites/{suite_id}/leases (for each)          → lease_ids
+   - Optional: POST /api/v1/leases/{lease_id}/rent-steps
+   - Optional: POST /api/v1/leases/{lease_id}/free-rent-periods
+   - Optional: POST /api/v1/leases/{lease_id}/expense-recoveries
+5. POST /api/v1/properties/{property_id}/expenses (for each)
+6. POST /api/v1/properties/{property_id}/other-income (optional custom revenue lines)
+7. POST /api/v1/properties/{property_id}/market-profiles (for each space type)
+8. POST /api/v1/properties/{property_id}/capital-projects (if any)
+9. POST /api/v1/properties/{property_id}/valuations             → valuation_id
+10. POST /api/v1/valuations/{valuation_id}/run                   → full results
 ```
 
-Most create/update payloads also support an optional `comment` field. Populate it with the data source or rationale when available.
+Most create/update payloads across assumptions and line items support an optional `comment` field. Populate it with data source/provenance (OM page, broker quote, public filing, etc.) when available.
 
 ## API Base URL
 
@@ -93,6 +94,7 @@ The engine automatically uses occupancy-based projection (not lease-by-lease ren
 Frontend note:
 - The UI displays and accepts percent fields as whole percentages (e.g., `5.00%`) but sends decimals to the API (`0.05`).
 - Multifamily/self-storage market rents are shown with whole-dollar formatting (`$#,##0`) with no decimals.
+- In valuation reports, `Other Income` is shown as its own annual cash-flow line item (with optional category detail).
 
 ### Recovery Types
 - `nnn` — tenant pays all recoverable expenses (triple net)
@@ -121,6 +123,9 @@ After running, the response includes:
 Debt modeling convention:
 - For levered runs, debt service follows amortization through loan maturity, then applies a balloon payoff of remaining principal at term-end; no debt service is applied after maturity.
 
+Terminal value convention:
+- Default `exit_cap_applied_to_year = -1` uses explicit Hold+1 NOI (Year N+1) for sale value, not a simple growth approximation.
+
 ## Presenting Results
 
 After running a valuation, present the key metrics clearly:
@@ -146,6 +151,7 @@ If the user wants to see the full waterfall, show the annual cash flow summary t
 ### Endpoint Catalog (Complete)
 
 System / metadata:
+- `GET /` (serves frontend `index.html` when frontend is mounted)
 - `GET /health`
 - `GET /api/v1/enums`
 
@@ -219,8 +225,8 @@ Recovery structures:
 - `DELETE /api/v1/properties/{property_id}/recovery-structures/{rs_id}`
 
 Recovery structure items:
-- `POST /api/v1/recovery-structures/{recovery_structure_id}/items`
-- `DELETE /api/v1/recovery-structures/{recovery_structure_id}/items/{item_id}`
+- `POST /api/v1/properties/{property_id}/recovery-structures/{rs_id}/items`
+- `DELETE /api/v1/properties/{property_id}/recovery-structures/{rs_id}/items/{item_id}`
 
 Valuations:
 - `POST /api/v1/properties/{property_id}/valuations`
@@ -250,6 +256,7 @@ For complete field specifications, read the reference file:
 - Market profiles link to suites via `space_type` string matching — make sure they match exactly
 - For multifamily, suites represent unit types (e.g., "1BR", "2BR"), not individual apartments. The `area` field is the unit count, not square footage.
 - For multifamily/self-storage, market leasing assumptions are streamlined in the rent roll: market rent and in-place rent are adjacent, and both rent/unit and growth % are editable inline from the rent roll.
+- OM ingestion convention: treat OM pro forma values as Year 1 inputs; treat historical/T-12 values as Year 0 context and normalize/roll them into Year 1 assumptions before running valuation.
 - You can create multiple valuations with different assumptions (base case, upside, downside) on the same property
 - After creating a valuation, you must POST to `/valuations/{id}/run` to execute the engine
 - The frontend is at `http://localhost:8001` — tell the user they can view results there too
