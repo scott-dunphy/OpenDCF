@@ -390,7 +390,14 @@ def run_valuation(
             if lease_input is None:
                 continue  # vacant slices have unique IDs and no recovery
             attach_expense_recoveries(
-                lslices, lease_input, expenses, analysis, total_area, occupancy_by_month
+                lslices,
+                lease_input,
+                expenses,
+                analysis,
+                total_area,
+                occupancy_by_month,
+                apply_stabilized_gross_up=params.apply_stabilized_gross_up,
+                stabilized_occupancy_pct=params.stabilized_occupancy_pct,
             )
 
     # Step 4: Build debt schedule
@@ -406,6 +413,7 @@ def run_valuation(
         analysis=analysis,
         market_map=market_assumptions,
         debt_schedule=debt_schedule,
+        occupancy_by_month=occupancy_by_month,
         capital_projects=capital_projects,
         other_income_items=other_income_items,
         other_income_annual=other_income_annual,

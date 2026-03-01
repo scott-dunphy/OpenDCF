@@ -189,6 +189,12 @@ class TestValuationWorkflow:
         assert td_resp.status_code == 200
         assert isinstance(td_resp.json(), list)
 
+        # Full report should retain computed occupancy in cached response
+        full_resp = await client.get(f"/api/v1/valuations/{val_id}/reports/full")
+        assert full_resp.status_code == 200
+        full = full_resp.json()
+        assert float(full["key_metrics"]["avg_occupancy_pct"]) > 0
+
     async def test_health_endpoint(self, client: AsyncClient):
         resp = await client.get("/health")
         assert resp.status_code == 200
@@ -221,23 +227,31 @@ class TestValuationWorkflow:
             "discount_rate": "0.08",
             "exit_cap_rate": "0.065",
             "transfer_tax_preset": "la_city_ula",
+            "apply_stabilized_gross_up": True,
         })
         assert created.status_code == 201
         val = created.json()
         assert val["transfer_tax_preset"] == "la_city_ula"
+        assert val["apply_stabilized_gross_up"] is True
 
         val_id = val["id"]
         updated = await client.put(f"/api/v1/valuations/{val_id}", json={
             "transfer_tax_preset": "custom_rate",
             "transfer_tax_custom_rate": "0.05",
+            "apply_stabilized_gross_up": False,
+            "stabilized_occupancy_pct": "0.90",
         })
         assert updated.status_code == 200
         val2 = updated.json()
         assert val2["transfer_tax_preset"] == "custom_rate"
         assert float(val2["transfer_tax_custom_rate"]) == pytest.approx(0.05)
+        assert val2["apply_stabilized_gross_up"] is False
+        assert float(val2["stabilized_occupancy_pct"]) == pytest.approx(0.90)
 
         fetched = await client.get(f"/api/v1/valuations/{val_id}")
         assert fetched.status_code == 200
         val3 = fetched.json()
         assert val3["transfer_tax_preset"] == "custom_rate"
         assert float(val3["transfer_tax_custom_rate"]) == pytest.approx(0.05)
+        assert val3["apply_stabilized_gross_up"] is False
+        assert float(val3["stabilized_occupancy_pct"]) == pytest.approx(0.90)

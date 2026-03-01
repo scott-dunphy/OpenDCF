@@ -22,6 +22,8 @@ class ValuationBase(BaseModel):
         description="Transfer tax preset code (none, custom_rate, la_city_ula, etc.)",
     )
     transfer_tax_custom_rate: Decimal | None = Field(default=None, ge=0, lt=1)
+    apply_stabilized_gross_up: bool = True
+    stabilized_occupancy_pct: Decimal | None = Field(default=None, ge=0, le=1)
     capital_reserves_per_unit: Decimal = Field(
         default=Decimal("0.25"), ge=0,
         description="$/SF/yr or $/unit/yr capital reserves"
@@ -46,6 +48,8 @@ class ValuationCreate(ValuationBase):
                 "exit_cap_applied_to_year": -1,
                 "exit_costs_pct": "0.02",
                 "transfer_tax_preset": "none",
+                "apply_stabilized_gross_up": True,
+                "stabilized_occupancy_pct": "0.95",
                 "capital_reserves_per_unit": "0.25",
                 "use_mid_year_convention": False,
             }
@@ -63,6 +67,8 @@ class ValuationUpdate(BaseModel):
     exit_costs_pct: Decimal | None = Field(default=None, ge=0, lt=1)
     transfer_tax_preset: str | None = None
     transfer_tax_custom_rate: Decimal | None = Field(default=None, ge=0, lt=1)
+    apply_stabilized_gross_up: bool | None = None
+    stabilized_occupancy_pct: Decimal | None = Field(default=None, ge=0, le=1)
     capital_reserves_per_unit: Decimal | None = Field(default=None, ge=0)
     use_mid_year_convention: bool | None = None
     loan_amount: Decimal | None = None

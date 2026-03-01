@@ -936,6 +936,17 @@ const VALUATION_FIELDS = [
     { key: 'capital_reserves_per_unit', label: 'Capital Reserves $/SF/yr', type: 'number', step: '0.05', default: 0.25, half: true },
     { key: 'exit_cap_applied_to_year', label: 'Exit Cap Applied to Year', type: 'number', step: '1', default: -1, half: true, helpText: '-1 = forward year (Hold + 1 NOI)' },
     { key: 'use_mid_year_convention', label: 'Use mid-year discounting', type: 'checkbox', default: false },
+    { key: 'apply_stabilized_gross_up', label: 'Apply stabilized gross-up', type: 'checkbox', default: true },
+    {
+        key: 'stabilized_occupancy_pct',
+        label: 'Stabilized Occupancy %',
+        type: 'number',
+        step: '0.005',
+        default: 0.95,
+        half: true,
+        helpText: 'Optional global gross-up target. Leave blank to use each expense line target.',
+        visibleWhen: v => v.apply_stabilized_gross_up,
+    },
     { type: 'section', label: 'Debt (optional)' },
     { key: 'loan_amount', label: 'Loan Amount ($)', type: 'number', step: '1', half: true },
     { key: 'interest_rate', label: 'Interest Rate', type: 'number', step: '0.0025', half: true, helpText: 'Enter percent' },
@@ -2808,6 +2819,9 @@ async function valuationView({ id }) {
     const cf = fullReport.annual_cash_flows;
     const tenants = fullReport.tenant_cash_flows;
     const expirations = fullReport.lease_expiration_schedule;
+    const showLeaseExpirations = !property || (
+        property.property_type !== 'multifamily' && property.property_type !== 'self_storage'
+    );
 
     $app().innerHTML = `
         <div class="property-header">
@@ -2837,44 +2851,12 @@ async function valuationView({ id }) {
                 <div class="metric-value">${fmt.currency(km.terminal_value)}</div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">Equity Multiple</div>
-                <div class="metric-value">${km.equity_multiple ? fmt.multiple(km.equity_multiple) : '—'}</div>
-            </div>
-            <div class="metric-card">
                 <div class="metric-label">Avg Occupancy</div>
                 <div class="metric-value">${fmt.pct(km.avg_occupancy_pct, 1)}</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">WALT</div>
                 <div class="metric-value">${km.weighted_avg_lease_term_years ? fmt.years(km.weighted_avg_lease_term_years) : '—'}</div>
-            </div>
-        </div>
-
-        <!-- Year 1 Snapshot -->
-        <div class="kpi-row" style="margin-bottom:28px">
-            <div class="kpi-card">
-                <div class="kpi-label">Year 1 GPI</div>
-                <div class="kpi-value">${fmt.currency(km.year1_gpi)}</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-label">Year 1 EGI</div>
-                <div class="kpi-value">${fmt.currency(km.year1_egi)}</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-label">Year 1 NOI</div>
-                <div class="kpi-value accent">${fmt.currency(km.year1_noi)}</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-label">Year 1 CFBD</div>
-                <div class="kpi-value">${fmt.currency(km.year1_cfbd)}</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-label">PV of Cash Flows</div>
-                <div class="kpi-value">${fmt.currency(km.pv_of_cash_flows)}</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-label">PV of Terminal</div>
-                <div class="kpi-value">${fmt.currency(km.pv_of_terminal_value)}</div>
             </div>
         </div>
 
@@ -2890,7 +2872,7 @@ async function valuationView({ id }) {
             </div>
         </div>
 
-        ${expirations.length > 0 ? `
+        ${showLeaseExpirations && expirations.length > 0 ? `
         <div class="chart-container">
             <div class="chart-title">Lease Expiration Schedule</div>
             <div class="chart-wrap"><canvas id="expChart"></canvas></div>
@@ -2909,7 +2891,7 @@ async function valuationView({ id }) {
     // Render charts
     renderNOIChart(cf);
     renderCFBDChart(cf);
-    if (expirations.length > 0) renderExpirationChart(expirations);
+    if (showLeaseExpirations && expirations.length > 0) renderExpirationChart(expirations);
 
     wireValuationActions();
 

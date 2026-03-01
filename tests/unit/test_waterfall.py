@@ -21,6 +21,8 @@ def make_params(
     exit_cap_rate: float = 0.065,
     cap_reserves: float = 0.0,
     total_area: float = 10_000,
+    apply_stabilized_gross_up: bool = True,
+    stabilized_occupancy_pct: float | None = None,
 ) -> ValuationParams:
     return ValuationParams(
         discount_rate=Decimal(str(discount_rate)),
@@ -35,6 +37,11 @@ def make_params(
         amortization_months=None,
         loan_term_months=None,
         io_period_months=0,
+        apply_stabilized_gross_up=apply_stabilized_gross_up,
+        stabilized_occupancy_pct=(
+            Decimal(str(stabilized_occupancy_pct))
+            if stabilized_occupancy_pct is not None else None
+        ),
     )
 
 
@@ -73,6 +80,8 @@ def make_expense(
     base_amount: float = 0.0,
     growth_rate: float = 0.0,
     is_recoverable: bool = True,
+    is_gross_up_eligible: bool = False,
+    gross_up_vacancy_pct: float | None = None,
     is_pct_egi: bool = False,
     pct_egi: float | None = None,
 ) -> ExpenseInput:
@@ -82,8 +91,11 @@ def make_expense(
         base_amount=Decimal(str(base_amount)),
         growth_rate=Decimal(str(growth_rate)),
         is_recoverable=is_recoverable,
-        is_gross_up_eligible=False,
-        gross_up_vacancy_pct=None,
+        is_gross_up_eligible=is_gross_up_eligible,
+        gross_up_vacancy_pct=(
+            Decimal(str(gross_up_vacancy_pct))
+            if gross_up_vacancy_pct is not None else None
+        ),
         is_pct_of_egi=is_pct_egi,
         pct_of_egi=Decimal(str(pct_egi)) if pct_egi is not None else None,
     )
@@ -317,6 +329,171 @@ class TestMgmtFeeCircularity:
         cf = annual_cfs[0]
         # operating_expenses is negative
         assert abs(cf.net_operating_income - (cf.effective_gross_income + cf.operating_expenses)) < Decimal("1")
+
+
+class TestOperatingExpenseGrossUp:
+    def test_gross_up_eligible_opex_is_normalized_at_low_occupancy(self):
+        suite = make_suite("s1", area=10_000)
+        analysis = build_analysis_period(date(2025, 1, 1), 12, 12)
+        market = {"office": make_market(gen_vac=0.0, credit_loss=0.0)}
+        params = make_params(total_area=10_000)
+
+        # Simple rent so EGI is positive; occupancy for gross-up is passed separately.
+        slices = make_year1_slices("s1", 10_000 / 12)
+        occupancy_by_month = [Decimal("1.0")] * 6 + [Decimal("0.0")] * 6
+
+        variable_opex = make_expense(
+            category="utilities",
+            base_amount=120_000,
+            growth_rate=0.0,
+            is_recoverable=False,
+            is_gross_up_eligible=True,
+            gross_up_vacancy_pct=0.95,
+        )
+
+        annual_cfs, _ = build_annual_waterfall(
+            suite_slices={"s1": slices},
+            suites=[suite],
+            expenses=[variable_opex],
+            params=params,
+            analysis=analysis,
+            market_map=market,
+            debt_schedule=[Decimal(0)],
+            occupancy_by_month=occupancy_by_month,
+        )
+
+        cf = annual_cfs[0]
+        expected_opex = Decimal("120000") * (Decimal("0.95") / Decimal("0.5"))
+        assert abs((-cf.operating_expenses) - expected_opex) < Decimal("1")
+
+    def test_non_eligible_opex_is_not_grossed_up(self):
+        suite = make_suite("s1", area=10_000)
+        analysis = build_analysis_period(date(2025, 1, 1), 12, 12)
+        market = {"office": make_market(gen_vac=0.0, credit_loss=0.0)}
+        params = make_params(total_area=10_000)
+        slices = make_year1_slices("s1", 10_000 / 12)
+        occupancy_by_month = [Decimal("1.0")] * 6 + [Decimal("0.0")] * 6
+
+        fixed_opex = make_expense(
+            category="insurance",
+            base_amount=120_000,
+            growth_rate=0.0,
+            is_recoverable=False,
+            is_gross_up_eligible=False,
+        )
+
+        annual_cfs, _ = build_annual_waterfall(
+            suite_slices={"s1": slices},
+            suites=[suite],
+            expenses=[fixed_opex],
+            params=params,
+            analysis=analysis,
+            market_map=market,
+            debt_schedule=[Decimal(0)],
+            occupancy_by_month=occupancy_by_month,
+        )
+
+        cf = annual_cfs[0]
+        assert abs((-cf.operating_expenses) - Decimal("120000")) < Decimal("1")
+
+    def test_valuation_level_toggle_can_disable_gross_up(self):
+        suite = make_suite("s1", area=10_000)
+        analysis = build_analysis_period(date(2025, 1, 1), 12, 12)
+        market = {"office": make_market(gen_vac=0.0, credit_loss=0.0)}
+        params = make_params(total_area=10_000, apply_stabilized_gross_up=False)
+        slices = make_year1_slices("s1", 10_000 / 12)
+        occupancy_by_month = [Decimal("1.0")] * 6 + [Decimal("0.0")] * 6
+
+        variable_opex = make_expense(
+            category="utilities",
+            base_amount=120_000,
+            growth_rate=0.0,
+            is_recoverable=False,
+            is_gross_up_eligible=True,
+            gross_up_vacancy_pct=0.95,
+        )
+
+        annual_cfs, _ = build_annual_waterfall(
+            suite_slices={"s1": slices},
+            suites=[suite],
+            expenses=[variable_opex],
+            params=params,
+            analysis=analysis,
+            market_map=market,
+            debt_schedule=[Decimal(0)],
+            occupancy_by_month=occupancy_by_month,
+        )
+
+        cf = annual_cfs[0]
+        assert abs((-cf.operating_expenses) - Decimal("120000")) < Decimal("1")
+
+    def test_valuation_level_stabilized_occupancy_overrides_expense_target(self):
+        suite = make_suite("s1", area=10_000)
+        analysis = build_analysis_period(date(2025, 1, 1), 12, 12)
+        market = {"office": make_market(gen_vac=0.0, credit_loss=0.0)}
+        params = make_params(total_area=10_000, stabilized_occupancy_pct=0.90)
+        slices = make_year1_slices("s1", 10_000 / 12)
+        occupancy_by_month = [Decimal("1.0")] * 6 + [Decimal("0.0")] * 6
+
+        variable_opex = make_expense(
+            category="utilities",
+            base_amount=120_000,
+            growth_rate=0.0,
+            is_recoverable=False,
+            is_gross_up_eligible=True,
+            gross_up_vacancy_pct=0.95,  # should be overridden by valuation-level 0.90
+        )
+
+        annual_cfs, _ = build_annual_waterfall(
+            suite_slices={"s1": slices},
+            suites=[suite],
+            expenses=[variable_opex],
+            params=params,
+            analysis=analysis,
+            market_map=market,
+            debt_schedule=[Decimal(0)],
+            occupancy_by_month=occupancy_by_month,
+        )
+
+        cf = annual_cfs[0]
+        expected_opex = Decimal("120000") * (Decimal("0.90") / Decimal("0.5"))
+        assert abs((-cf.operating_expenses) - expected_opex) < Decimal("1")
+
+    def test_waterfall_autocomputes_occupancy_when_not_passed(self):
+        suite = make_suite("s1", area=10_000)
+        analysis = build_analysis_period(date(2025, 1, 1), 12, 12)
+        market = {"office": make_market(gen_vac=0.0, credit_loss=0.0)}
+        params = make_params(total_area=10_000)
+
+        slices = []
+        for i in range(12):
+            if i < 6:
+                slices.append(make_slice("s1", i, 10_000 / 12, is_vacant=False))
+            else:
+                slices.append(make_slice("s1", i, 0, is_vacant=True))
+
+        variable_opex = make_expense(
+            category="utilities",
+            base_amount=120_000,
+            growth_rate=0.0,
+            is_recoverable=False,
+            is_gross_up_eligible=True,
+            gross_up_vacancy_pct=0.95,
+        )
+
+        annual_cfs, _ = build_annual_waterfall(
+            suite_slices={"s1": slices},
+            suites=[suite],
+            expenses=[variable_opex],
+            params=params,
+            analysis=analysis,
+            market_map=market,
+            debt_schedule=[Decimal(0)],
+        )
+
+        cf = annual_cfs[0]
+        expected_opex = Decimal("120000") * (Decimal("0.95") / Decimal("0.5"))
+        assert abs((-cf.operating_expenses) - expected_opex) < Decimal("1")
 
 
 class TestCapReserves:

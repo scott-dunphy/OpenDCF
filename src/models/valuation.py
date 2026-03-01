@@ -29,6 +29,8 @@ class Valuation(Base, UUIDPrimaryKey, TimestampMixin):
     exit_costs_pct: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal("0.02"))
     transfer_tax_preset: Mapped[str] = mapped_column(String(64), default="none")
     transfer_tax_custom_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    apply_stabilized_gross_up: Mapped[bool] = mapped_column(default=True)
+    stabilized_occupancy_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     capital_reserves_per_unit: Mapped[Decimal] = mapped_column(
         Numeric(18, 6), default=Decimal("0.25")
     )  # $/SF/yr or $/unit/yr
@@ -47,6 +49,7 @@ class Valuation(Base, UUIDPrimaryKey, TimestampMixin):
     result_going_in_cap_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     result_exit_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     result_equity_multiple: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    result_avg_occupancy_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     result_terminal_noi_basis: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     result_terminal_gross_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     result_terminal_exit_costs_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))

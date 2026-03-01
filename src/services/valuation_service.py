@@ -117,6 +117,7 @@ class ValuationService:
             valuation.result_going_in_cap_rate = result.going_in_cap_rate
             valuation.result_exit_value = result.terminal_value
             valuation.result_equity_multiple = result.equity_multiple
+            valuation.result_avg_occupancy_pct = result.avg_occupancy_pct
             valuation.result_terminal_noi_basis = result.terminal_noi_basis
             valuation.result_terminal_gross_value = result.terminal_gross_value
             valuation.result_terminal_exit_costs_amount = result.terminal_exit_costs_amount
@@ -414,6 +415,8 @@ class ValuationService:
             exit_costs_pct=v.exit_costs_pct,
             transfer_tax_preset=v.transfer_tax_preset or "none",
             transfer_tax_custom_rate=v.transfer_tax_custom_rate,
+            apply_stabilized_gross_up=v.apply_stabilized_gross_up,
+            stabilized_occupancy_pct=v.stabilized_occupancy_pct,
             capital_reserves_per_unit=v.capital_reserves_per_unit,
             total_property_area=p.total_area,
             use_mid_year_convention=v.use_mid_year_convention,
@@ -553,7 +556,7 @@ class ValuationService:
             pv_of_cash_flows=Decimal(0),
             pv_of_terminal_value=Decimal(0),
             equity_multiple=valuation.result_equity_multiple,
-            avg_occupancy_pct=Decimal(0),
+            avg_occupancy_pct=valuation.result_avg_occupancy_pct or Decimal(0),
             weighted_avg_lease_term_years=None,
             terminal_noi_basis=valuation.result_terminal_noi_basis,
             terminal_gross_value=valuation.result_terminal_gross_value,

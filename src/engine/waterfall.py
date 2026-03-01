@@ -102,6 +102,52 @@ def _mgmt_fee_pct(expenses: list[ExpenseInput]) -> Decimal:
     return Decimal(0)
 
 
+def _grossed_up_opex_amount(
+    annual_exp: Decimal,
+    exp: ExpenseInput,
+    actual_occupancy: Decimal,
+    apply_stabilized_gross_up: bool,
+    stabilized_occupancy_pct: Decimal | None,
+) -> Decimal:
+    """
+    Gross up eligible operating expenses to their reference occupancy.
+
+    Formula: grossed_up = actual * (reference_occ / actual_occ)
+    """
+    if not apply_stabilized_gross_up:
+        return annual_exp
+    if not exp.is_gross_up_eligible:
+        return annual_exp
+    if actual_occupancy <= Decimal(0):
+        return annual_exp
+    ref = stabilized_occupancy_pct if stabilized_occupancy_pct is not None else exp.gross_up_vacancy_pct
+    if ref is None:
+        return annual_exp
+    if actual_occupancy >= ref:
+        return annual_exp
+    return annual_exp * (ref / actual_occupancy)
+
+
+def _avg_occupancy_for_fiscal_year(
+    analysis: AnalysisPeriod,
+    fy: FiscalYear,
+    occupancy_by_month: list[Decimal] | None,
+) -> Decimal:
+    """Average monthly occupancy within a fiscal year."""
+    if not occupancy_by_month:
+        return Decimal(1)
+
+    occ_values: list[Decimal] = []
+    for month_idx, occ in enumerate(occupancy_by_month):
+        month_start = add_months(analysis.start_date, month_idx)
+        if fy.start_date <= month_start <= fy.end_date:
+            occ_values.append(occ)
+
+    if not occ_values:
+        return Decimal(1)
+    return sum(occ_values) / Decimal(str(len(occ_values)))
+
+
 def build_annual_waterfall(
     suite_slices: dict[str, list[MonthlySlice]],  # suite_id -> flat list of all slices
     suites: list[SuiteInput],
@@ -110,6 +156,7 @@ def build_annual_waterfall(
     analysis: AnalysisPeriod,
     market_map: dict[str, MarketAssumptions],
     debt_schedule: list[Decimal],  # annual debt service by year (1-indexed)
+    occupancy_by_month: list[Decimal] | None = None,
     capital_projects: list | None = None,
     other_income_items: list | None = None,
     other_income_annual: Decimal = Decimal(0),  # legacy flat amount
@@ -124,6 +171,8 @@ def build_annual_waterfall(
     gen_vac_rate = _blended_vacancy_rate(suites, market_map)
     credit_loss_rate = _blended_credit_loss_rate(suites, market_map)
     mgmt_pct = _mgmt_fee_pct(expenses)
+    if occupancy_by_month is None:
+        occupancy_by_month = compute_occupancy_by_month(suite_slices, suites, analysis)
     non_egi_expenses = [e for e in expenses if not e.is_pct_of_egi]
     suite_area_map = {s.suite_id: s.area for s in suites}
     suite_name_map = {s.suite_id: s.suite_name for s in suites}
@@ -232,11 +281,20 @@ def build_annual_waterfall(
         credit_loss = -(scheduled_rent * credit_loss_rate)
         egi = gpi + gen_vac_loss + credit_loss
 
+        fy_avg_occ = _avg_occupancy_for_fiscal_year(analysis, fy, occupancy_by_month)
+
         # Fixed operating expenses (non_egi_expenses already excludes pct-of-EGI items)
         opex = Decimal(0)
         exp_detail: dict[str, Decimal] = {}
         for exp in non_egi_expenses:
-            amt = expense_at_year(exp.base_amount, exp.growth_rate, year)
+            annual_exp = expense_at_year(exp.base_amount, exp.growth_rate, year)
+            amt = _grossed_up_opex_amount(
+                annual_exp,
+                exp,
+                fy_avg_occ,
+                apply_stabilized_gross_up=params.apply_stabilized_gross_up,
+                stabilized_occupancy_pct=params.stabilized_occupancy_pct,
+            )
             opex += amt
             exp_detail[exp.category] = exp_detail.get(exp.category, Decimal(0)) + amt
 

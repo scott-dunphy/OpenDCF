@@ -156,6 +156,8 @@ class ValuationParams:
     io_period_months: int
     transfer_tax_preset: str = "none"
     transfer_tax_custom_rate: Decimal | None = None
+    apply_stabilized_gross_up: bool = True
+    stabilized_occupancy_pct: Decimal | None = None
 
 
 @dataclass(frozen=True)

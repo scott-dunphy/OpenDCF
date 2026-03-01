@@ -43,17 +43,23 @@ def _grossed_up_expense(
     annual_exp: Decimal,
     exp: ExpenseInput,
     actual_occupancy: Decimal,
+    apply_stabilized_gross_up: bool = True,
+    stabilized_occupancy_pct: Decimal | None = None,
 ) -> Decimal:
     """
     Gross up variable expenses to reference occupancy level.
     Prevents under-recovery when building is partially vacant.
     Formula: grossed_up = actual * (reference_occ / actual_occ)
     """
-    if not exp.is_gross_up_eligible or exp.gross_up_vacancy_pct is None:
+    if not apply_stabilized_gross_up:
+        return annual_exp
+    if not exp.is_gross_up_eligible:
         return annual_exp
     if actual_occupancy <= Decimal(0):
         return annual_exp
-    ref = exp.gross_up_vacancy_pct
+    ref = stabilized_occupancy_pct if stabilized_occupancy_pct is not None else exp.gross_up_vacancy_pct
+    if ref is None:
+        return annual_exp
     if actual_occupancy >= ref:
         return annual_exp
     return annual_exp * (ref / actual_occupancy)
@@ -164,6 +170,8 @@ def attach_expense_recoveries(
     analysis: AnalysisPeriod,
     total_property_area: Decimal,
     occupancy_by_month: list[Decimal],
+    apply_stabilized_gross_up: bool = True,
+    stabilized_occupancy_pct: Decimal | None = None,
 ) -> None:
     """
     Compute and attach expense_recovery to each MonthlySlice in-place.
@@ -190,7 +198,13 @@ def attach_expense_recoveries(
                 continue  # management fees handled in waterfall
 
             annual_exp = _annual_expense(exp, year_number)
-            annual_exp_grossed = _grossed_up_expense(annual_exp, exp, actual_occupancy)
+            annual_exp_grossed = _grossed_up_expense(
+                annual_exp,
+                exp,
+                actual_occupancy,
+                apply_stabilized_gross_up=apply_stabilized_gross_up,
+                stabilized_occupancy_pct=stabilized_occupancy_pct,
+            )
 
             annual_recovery = _recovery_for_expense(
                 lease,
