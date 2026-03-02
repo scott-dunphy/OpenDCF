@@ -170,6 +170,12 @@ class TestValuationWorkflow:
         assert rr_resp.status_code == 200
         assert len(rr_resp.json()) == 3
 
+        # Rent roll Excel export
+        rr_xlsx_resp = await client.get(f"/api/v1/valuations/{val_id}/reports/rent-roll.xlsx")
+        assert rr_xlsx_resp.status_code == 200
+        assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in rr_xlsx_resp.headers.get("content-type", "")
+        assert rr_xlsx_resp.content[:2] == b"PK"
+
         # Lease expirations
         exp_resp = await client.get(f"/api/v1/valuations/{val_id}/reports/lease-expirations")
         assert exp_resp.status_code == 200
@@ -194,6 +200,7 @@ class TestValuationWorkflow:
         assert full_resp.status_code == 200
         full = full_resp.json()
         assert float(full["key_metrics"]["avg_occupancy_pct"]) > 0
+        assert float(full["key_metrics"]["weighted_avg_lease_term_years"]) > 0
 
     async def test_health_endpoint(self, client: AsyncClient):
         resp = await client.get("/health")
@@ -255,3 +262,67 @@ class TestValuationWorkflow:
         assert float(val3["transfer_tax_custom_rate"]) == pytest.approx(0.05)
         assert val3["apply_stabilized_gross_up"] is False
         assert float(val3["stabilized_occupancy_pct"]) == pytest.approx(0.90)
+
+    async def test_valuation_analysis_start_date_override(self, client: AsyncClient):
+        prop = await client.post("/api/v1/properties", json={
+            "name": "Start Date Override Property",
+            "property_type": "office",
+            "total_area": "10000",
+            "area_unit": "sf",
+            "analysis_start_date": "2025-01-01",
+            "analysis_period_months": 24,
+        })
+        assert prop.status_code == 201
+        prop_id = prop.json()["id"]
+
+        suite = await client.post(f"/api/v1/properties/{prop_id}/suites", json={
+            "suite_name": "Suite 100",
+            "area": "10000",
+            "space_type": "office",
+        })
+        assert suite.status_code == 201
+        suite_id = suite.json()["id"]
+
+        lease = await client.post(f"/api/v1/suites/{suite_id}/leases", json={
+            "lease_start_date": "2025-01-01",
+            "lease_end_date": "2025-12-31",
+            "base_rent_per_unit": "30.00",
+            "escalation_type": "flat",
+            "recovery_type": "nnn",
+        })
+        assert lease.status_code == 201
+
+        mkt = await client.post(f"/api/v1/properties/{prop_id}/market-profiles", json={
+            "space_type": "office",
+            "market_rent_per_unit": "35.00",
+        })
+        assert mkt.status_code == 201
+
+        created = await client.post(f"/api/v1/properties/{prop_id}/valuations", json={
+            "name": "Start Override Case",
+            "discount_rate": "0.08",
+            "exit_cap_rate": "0.065",
+            "analysis_start_date_override": "2026-01-01",
+        })
+        assert created.status_code == 201
+        val = created.json()
+        assert val["analysis_start_date_override"] == "2026-01-01"
+        val_id = val["id"]
+
+        run_override = await client.post(f"/api/v1/valuations/{val_id}/run")
+        assert run_override.status_code == 200
+        data_override = run_override.json()
+        assert data_override["rent_roll"][0]["lease_type"] == "vacant"
+        assert data_override["key_metrics"]["weighted_avg_lease_term_years"] is None
+
+        updated = await client.put(f"/api/v1/valuations/{val_id}", json={
+            "analysis_start_date_override": None,
+        })
+        assert updated.status_code == 200
+        assert updated.json()["analysis_start_date_override"] is None
+
+        run_default = await client.post(f"/api/v1/valuations/{val_id}/run")
+        assert run_default.status_code == 200
+        data_default = run_default.json()
+        assert data_default["rent_roll"][0]["lease_type"] == "in_place"
+        assert float(data_default["key_metrics"]["weighted_avg_lease_term_years"]) > 0

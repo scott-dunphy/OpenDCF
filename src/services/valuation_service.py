@@ -92,10 +92,11 @@ class ValuationService:
             engine_params = self._to_valuation_params(valuation, property_)
             engine_cap_projects = [self._to_capital_project_input(cp) for cp in cap_projects]
             engine_oi = [self._to_other_income_input(oi) for oi in oi_items]
+            analysis_start = self._effective_analysis_start_date(valuation, property_)
 
             # Run the engine
             result = run_valuation(
-                property_start_date=property_.analysis_start_date,
+                property_start_date=analysis_start,
                 analysis_period_months=property_.analysis_period_months,
                 fiscal_year_end_month=property_.fiscal_year_end_month,
                 suites=engine_suites,
@@ -137,7 +138,14 @@ class ValuationService:
             await self.db.commit()
 
             # Build response
-            return self._to_run_response(valuation, property_, suites, leases, result)
+            return self._to_run_response(
+                valuation,
+                property_,
+                suites,
+                leases,
+                result,
+                analysis_start,
+            )
 
         except Exception as exc:
             valuation.status = ValuationStatus.FAILED.value
@@ -178,16 +186,34 @@ class ValuationService:
             raw = json.loads(valuation.result_recovery_audit_json)
             for item in raw:
                 recovery_audit.append(TenantRecoveryAuditEntry(**item))
+        analysis_start = (
+            self._effective_analysis_start_date(valuation, property_)
+            if property_ is not None
+            else None
+        )
+        walt = (
+            self._compute_walt(suites, leases, analysis_start)
+            if analysis_start is not None
+            else None
+        )
 
         return ValuationRunResponse(
             valuation_id=valuation_id,
             status=valuation.status,
-            key_metrics=self._build_key_metrics_from_valuation(valuation, annual_cfs),
+            key_metrics=self._build_key_metrics_from_valuation(valuation, annual_cfs, walt),
             annual_cash_flows=annual_cfs,
             tenant_cash_flows=tenant_cfs,
             recovery_audit=recovery_audit,
-            rent_roll=self._build_rent_roll(suites, leases, property_),
-            lease_expiration_schedule=self._build_expiration_schedule(suites, leases, property_),
+            rent_roll=(
+                self._build_rent_roll(suites, leases, analysis_start)
+                if analysis_start is not None
+                else []
+            ),
+            lease_expiration_schedule=(
+                self._build_expiration_schedule(suites, leases, property_, analysis_start)
+                if property_ is not None and analysis_start is not None
+                else []
+            ),
         )
 
     # =========================================================================
@@ -478,6 +504,7 @@ class ValuationService:
         suites: list[Suite],
         leases: list[Lease],
         result,
+        analysis_start: date,
     ) -> ValuationRunResponse:
         annual_cfs = [
             AnnualCashFlowSummary(
@@ -511,10 +538,12 @@ class ValuationService:
         ]
 
         tenant_cfs = self._build_tenant_cash_flows(result, leases)
-        walt = self._compute_walt(suites, leases, property_.analysis_start_date)
+        walt = self._compute_walt(suites, leases, analysis_start)
         key_metrics = self._build_key_metrics(valuation, result, annual_cfs, walt)
-        expiration_schedule = self._build_expiration_schedule(suites, leases, property_)
-        rent_roll = self._build_rent_roll(suites, leases, property_)
+        expiration_schedule = self._build_expiration_schedule(
+            suites, leases, property_, analysis_start
+        )
+        rent_roll = self._build_rent_roll(suites, leases, analysis_start)
 
         return ValuationRunResponse(
             valuation_id=valuation.id,
@@ -554,7 +583,7 @@ class ValuationService:
         )
 
     def _build_key_metrics_from_valuation(
-        self, valuation: Valuation, annual_cfs: list
+        self, valuation: Valuation, annual_cfs: list, walt: Decimal | None = None
     ) -> KeyMetricsSummary | None:
         if valuation.result_npv is None:
             return None
@@ -569,7 +598,7 @@ class ValuationService:
             pv_of_terminal_value=Decimal(0),
             equity_multiple=valuation.result_equity_multiple,
             avg_occupancy_pct=valuation.result_avg_occupancy_pct or Decimal(0),
-            weighted_avg_lease_term_years=None,
+            weighted_avg_lease_term_years=walt,
             terminal_noi_basis=valuation.result_terminal_noi_basis,
             terminal_gross_value=valuation.result_terminal_gross_value,
             terminal_exit_costs_amount=valuation.result_terminal_exit_costs_amount,
@@ -662,10 +691,10 @@ class ValuationService:
         return rows
 
     def _build_rent_roll(
-        self, suites: list[Suite], leases: list[Lease], property_: Property
+        self, suites: list[Suite], leases: list[Lease], analysis_start: date
     ) -> list[RentRollEntry]:
         lease_by_suite: dict[str, Lease | None] = {s.id: None for s in suites}
-        today = property_.analysis_start_date
+        today = analysis_start
         for lease in leases:
             if lease.lease_start_date <= today <= lease.lease_end_date:
                 lease_by_suite[lease.suite_id] = lease
@@ -729,10 +758,13 @@ class ValuationService:
         return total_weighted / total_leased_area
 
     def _build_expiration_schedule(
-        self, suites: list[Suite], leases: list[Lease], property_: Property
+        self,
+        suites: list[Suite],
+        leases: list[Lease],
+        property_: Property,
+        analysis_start: date,
     ) -> list[LeaseExpirationEntry]:
         from collections import defaultdict
-        analysis_start = property_.analysis_start_date
         analysis_end_year = analysis_start.year + (property_.analysis_period_months // 12) + 1
 
         by_year: dict[int, list[Lease]] = defaultdict(list)
@@ -758,3 +790,6 @@ class ValuationService:
                 weighted_avg_rent_per_sf=avg_rent,
             ))
         return result
+
+    def _effective_analysis_start_date(self, valuation: Valuation, property_: Property) -> date:
+        return valuation.analysis_start_date_override or property_.analysis_start_date

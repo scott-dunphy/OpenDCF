@@ -1,6 +1,7 @@
+from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Date, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin, UUIDPrimaryKey
@@ -18,6 +19,7 @@ class Valuation(Base, UUIDPrimaryKey, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
     comment: Mapped[str | None] = mapped_column(Text)
+    analysis_start_date_override: Mapped[date | None] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(20), default=ValuationStatus.DRAFT.value)
     error_message: Mapped[str | None] = mapped_column(Text)
 

@@ -181,6 +181,15 @@ function isPercentNumberField(field) {
     return key.endsWith('_pct') || key.endsWith('_rate') || PERCENT_NUMBER_KEYS.has(key);
 }
 
+function isPerSfNumberField(field) {
+    if (!field || field.type !== 'number') return false;
+    if (field.asPerSf === true) return true;
+    if (field.asPerSf === false) return false;
+    const key = (field.key || '').toLowerCase();
+    const label = (field.label || '').toUpperCase();
+    return key.includes('_per_sf') || label.includes('/SF');
+}
+
 function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -214,6 +223,8 @@ function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
                     if (isPercentNumberField(f)) n = n / 100;
                     vals[f.key] = n;
                 }
+            } else if (f.type === 'date') {
+                vals[f.key] = el.value || null;
             } else vals[f.key] = el.value;
         });
         return vals;
@@ -301,6 +312,9 @@ function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
             if (isPercentNumberField(f) && rawInitVal !== '' && rawInitVal != null) {
                 const n = parseFloat(rawInitVal);
                 initVal = Number.isNaN(n) ? '' : (n * 100).toFixed(2);
+            } else if (isPerSfNumberField(f) && rawInitVal !== '' && rawInitVal != null) {
+                const n = parseFloat(rawInitVal);
+                initVal = Number.isNaN(n) ? '' : n.toFixed(2);
             }
             input.value = initVal;
             input.id = 'form_' + f.key;
@@ -591,7 +605,7 @@ const ESCALATION_TYPES = ['flat', 'pct_annual', 'cpi', 'fixed_step'];
 const RECOVERY_TYPES = ['nnn', 'full_service_gross', 'modified_gross', 'base_year_stop', 'none'];
 const LEASE_TYPES = ['in_place', 'market', 'month_to_month'];
 
-function buildLeaseFields(suites, tenants, onNewTenant, recoveryStructures, includeSuite = true) {
+function buildLeaseFields(suites, tenants, onNewTenant, recoveryStructures, includeSuite = true, areaUnit = 'sf') {
     const rsOptions = [
         { value: '', label: '— None —' },
         ...(recoveryStructures || []).map(rs => ({ value: rs.id, label: rs.name }))
@@ -601,7 +615,16 @@ function buildLeaseFields(suites, tenants, onNewTenant, recoveryStructures, incl
         { key: 'lease_type', label: 'Lease Type', type: 'select', options: LEASE_TYPES, default: 'in_place', half: true },
         { key: 'comment', label: 'Comment / Source Note', type: 'textarea' },
         { key: 'rent_payment_frequency', label: 'Payment Frequency', type: 'select', options: [{ value: 'annual', label: 'Annual ($/SF/yr)' }, { value: 'monthly', label: 'Monthly ($/unit/mo)' }], default: 'annual', half: true },
-        { key: 'base_rent_per_unit', label: 'Base Rent', type: 'number', required: true, step: '0.01', half: true, helpText: 'Per unit per payment frequency above' },
+        {
+            key: 'base_rent_per_unit',
+            label: 'Base Rent',
+            type: 'number',
+            required: true,
+            step: '0.01',
+            half: true,
+            asPerSf: areaUnit !== 'unit',
+            helpText: 'Per unit per payment frequency above',
+        },
         { key: 'lease_start_date', label: 'Start Date', type: 'date', required: true, half: true },
         { key: 'lease_end_date', label: 'End Date', type: 'date', required: true, half: true },
         { type: 'section', label: 'Escalation' },
@@ -926,6 +949,13 @@ const VALUATION_FIELDS = [
     { key: 'name', label: 'Valuation Name', type: 'text', required: true },
     { key: 'description', label: 'Description', type: 'text' },
     { key: 'comment', label: 'Comment / Source Note', type: 'textarea' },
+    {
+        key: 'analysis_start_date_override',
+        label: 'Analysis Start Date Override',
+        type: 'date',
+        half: true,
+        helpText: 'Optional. Leave blank to use the property analysis start date.',
+    },
     { key: 'discount_rate', label: 'Discount Rate', type: 'number', required: true, step: '0.0025', default: 0.08, half: true, helpText: 'Enter percent' },
     { key: 'exit_cap_rate', label: 'Exit Cap Rate', type: 'number', required: true, step: '0.0025', default: 0.065, half: true, helpText: 'Enter percent' },
     { key: 'exit_costs_pct', label: 'Exit Costs %', type: 'number', step: '0.005', default: 0.02, half: true, helpText: 'Enter percent' },
@@ -1974,7 +2004,8 @@ async function propertyView({ id }) {
                 tenants,
                 onNewTenant,
                 recoveryStructures,
-                opts.includeSuite !== false
+                opts.includeSuite !== false,
+                property.area_unit
             );
             const formOverlay = showFormModal({
                 title,
@@ -3127,6 +3158,9 @@ async function valuationView({ id }) {
     if (property) crumbs.push({ label: property.name, href: `#/property/${valuation.property_id}` });
     crumbs.push({ label: valuation.name });
     setBreadcrumb(crumbs);
+    const effectiveStartDate = valuation.analysis_start_date_override || (property ? property.analysis_start_date : null);
+    const startDateLabel = effectiveStartDate ? fmt.date(effectiveStartDate) : '—';
+    const startDateSuffix = valuation.analysis_start_date_override ? ' (Override)' : '';
 
     // Shared action button wiring (used for both draft and completed states)
     function wireValuationActions() {
@@ -3177,6 +3211,40 @@ async function valuationView({ id }) {
                 }
             };
         }
+        // Export rent roll (Excel)
+        const exportBtn = document.getElementById('valExportRentRollBtn');
+        if (exportBtn) {
+            exportBtn.onclick = async () => {
+                const original = exportBtn.textContent;
+                exportBtn.textContent = 'Exporting...';
+                exportBtn.disabled = true;
+                try {
+                    const res = await fetch(`/api/v1/valuations/${id}/reports/rent-roll.xlsx`);
+                    if (!res.ok) {
+                        const text = await res.text().catch(() => '');
+                        throw new Error(`Export failed (${res.status}) ${text}`);
+                    }
+                    const blob = await res.blob();
+                    const cd = res.headers.get('Content-Disposition') || '';
+                    const match = cd.match(/filename=\"?([^"]+)\"?/i);
+                    const filename = match ? match[1] : `rent-roll-${id}.xlsx`;
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                    toast('Rent roll exported', 'success');
+                } catch (err) {
+                    toast('Error: ' + err.message, 'error');
+                } finally {
+                    exportBtn.textContent = original;
+                    exportBtn.disabled = false;
+                }
+            };
+        }
         // Open dedicated tenant recovery audit page/tab
         const auditBtn = document.getElementById('valAuditBtn');
         if (auditBtn && valuation.property_id) {
@@ -3190,6 +3258,7 @@ async function valuationView({ id }) {
 
     const actionButtons = `
         <div class="property-header-actions">
+            <button class="btn btn-secondary btn-sm" id="valExportRentRollBtn">Export Rent Roll (Excel)</button>
             <button class="btn btn-secondary btn-sm" id="valAuditBtn">Tenant Recovery Audit</button>
             <button class="btn btn-secondary btn-sm" id="valEditBtn">${icons.edit} Edit</button>
             <button class="btn btn-primary btn-sm" id="valRunBtn">${fullReport && fullReport.key_metrics ? 'Re-run' : 'Run Valuation'}</button>
@@ -3201,7 +3270,7 @@ async function valuationView({ id }) {
             <div class="property-header">
                 <div class="property-header-left">
                     <h1 class="property-header-title">${valuation.name}</h1>
-                    <div class="property-header-address">Status: ${valuation.status}${valuation.error_message ? ' — ' + valuation.error_message : ''}</div>
+                    <div class="property-header-address">Status: ${valuation.status} &middot; Start ${startDateLabel}${startDateSuffix}${valuation.error_message ? ' — ' + valuation.error_message : ''}</div>
                 </div>
                 ${actionButtons}
             </div>
@@ -3226,7 +3295,7 @@ async function valuationView({ id }) {
         <div class="property-header">
             <div class="property-header-left">
                 <h1 class="property-header-title">${valuation.name}</h1>
-                <div class="property-header-address">${property ? property.name : ''} &middot; ${fmt.pct(valuation.discount_rate)} discount &middot; ${fmt.pct(valuation.exit_cap_rate)} exit cap${valuation.loan_amount ? ' &middot; Levered' : ''}</div>
+                <div class="property-header-address">${property ? property.name : ''} &middot; Start ${startDateLabel}${startDateSuffix} &middot; ${fmt.pct(valuation.discount_rate)} discount &middot; ${fmt.pct(valuation.exit_cap_rate)} exit cap${valuation.loan_amount ? ' &middot; Levered' : ''}</div>
             </div>
             ${actionButtons}
         </div>
@@ -3255,7 +3324,7 @@ async function valuationView({ id }) {
             </div>
             <div class="metric-card">
                 <div class="metric-label">WALT</div>
-                <div class="metric-value">${km.weighted_avg_lease_term_years ? fmt.years(km.weighted_avg_lease_term_years) : '—'}</div>
+                <div class="metric-value">${km.weighted_avg_lease_term_years != null ? fmt.years(km.weighted_avg_lease_term_years) : '—'}</div>
             </div>
         </div>
 

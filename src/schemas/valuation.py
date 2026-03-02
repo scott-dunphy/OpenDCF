@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -10,6 +10,10 @@ class ValuationBase(BaseModel):
     name: str = Field(max_length=255)
     description: str | None = None
     comment: str | None = None
+    analysis_start_date_override: date | None = Field(
+        default=None,
+        description="Optional valuation-specific analysis start date; falls back to property analysis_start_date.",
+    )
     discount_rate: Decimal = Field(gt=0, lt=1, description="e.g. 0.08 = 8%")
     exit_cap_rate: Decimal = Field(gt=0, lt=1, description="e.g. 0.065 = 6.5%")
     exit_cap_applied_to_year: int = Field(
@@ -43,6 +47,7 @@ class ValuationCreate(ValuationBase):
         json_schema_extra={
             "example": {
                 "name": "Base Case Q1 2025",
+                "analysis_start_date_override": "2025-01-01",
                 "discount_rate": "0.08",
                 "exit_cap_rate": "0.065",
                 "exit_cap_applied_to_year": -1,
@@ -61,6 +66,7 @@ class ValuationUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     description: str | None = None
     comment: str | None = None
+    analysis_start_date_override: date | None = None
     discount_rate: Decimal | None = Field(default=None, gt=0, lt=1)
     exit_cap_rate: Decimal | None = Field(default=None, gt=0, lt=1)
     exit_cap_applied_to_year: int | None = None
