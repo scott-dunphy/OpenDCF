@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+from src.engine.date_utils import proration_factor
 from src.engine.growth import expense_at_year
 from src.engine.types import (
     AnalysisPeriod,
@@ -23,6 +24,7 @@ from src.engine.types import (
     FiscalYear,
     LeaseInput,
     MonthlySlice,
+    RecoveryAuditEntry,
 )
 
 
@@ -81,6 +83,15 @@ def _is_free_rent_for_recoveries(lease: LeaseInput, period_start: date, period_e
     return False
 
 
+def _effective_recovery_type(lease: LeaseInput, expense_category: str) -> str:
+    """Return effective recovery type for a category (override first, then lease default)."""
+    override = next(
+        (o for o in lease.recovery_overrides if o.expense_category == expense_category),
+        None,
+    )
+    return override.recovery_type if override else lease.recovery_type
+
+
 def _recovery_for_expense(
     lease: LeaseInput,
     exp: ExpenseInput,
@@ -88,7 +99,9 @@ def _recovery_for_expense(
     total_property_area: Decimal,
     year_number: int,
     analysis_start_year: int,
-) -> Decimal:
+    modified_gross_pool_annual: Decimal | None = None,
+    modified_gross_pool_share: Decimal | None = None,
+) -> tuple[Decimal, dict[str, Decimal | str | None]]:
     """
     Compute the annual recovery amount for one expense line item for one lease.
     Applies the lease's recovery_type (or per-category override).
@@ -101,7 +114,15 @@ def _recovery_for_expense(
     recovery_type = override.recovery_type if override else lease.recovery_type
 
     if recovery_type in ("full_service_gross", "none"):
-        return Decimal(0)
+        return Decimal(0), {
+            "recovery_type": recovery_type,
+            "pro_rata_share_pct": Decimal(0),
+            "base_year_stop_amount": None,
+            "expense_stop_per_sf": None,
+            "cap_per_sf_annual": None,
+            "floor_per_sf_annual": None,
+            "admin_fee_pct": None,
+        }
 
     # Compute pro-rata share
     pro_rata = lease.pro_rata_share
@@ -110,6 +131,12 @@ def _recovery_for_expense(
             pro_rata = lease.area / total_property_area
         else:
             pro_rata = Decimal(0)
+
+    base_stop_used: Decimal | None = None
+    expense_stop_per_sf: Decimal | None = None
+    cap_per_sf_annual: Decimal | None = override.cap_per_sf_annual if override else None
+    floor_per_sf_annual: Decimal | None = override.floor_per_sf_annual if override else None
+    admin_fee_pct: Decimal | None = override.admin_fee_pct if override else None
 
     if recovery_type == "nnn":
         recovery = annual_expense_grossed * pro_rata
@@ -134,20 +161,47 @@ def _recovery_for_expense(
                 base_stop = exp.base_amount if growth_factor == Decimal(0) else exp.base_amount / growth_factor
         else:
             base_stop = exp.base_amount
+        base_stop_used = base_stop
         excess = max(Decimal(0), annual_expense_grossed - base_stop)
         recovery = excess * pro_rata
 
     elif recovery_type == "modified_gross":
-        # Tenant pays pro-rata share of expense/SF above stop/SF
+        # Tenant pays expense/SF above stop/SF.
+        # Apply stop at pooled modified-gross expense level (industry convention),
+        # then allocate pooled excess to each category by that category's pool share.
         stop_per_sf = lease.expense_stop_per_sf or Decimal(0)
         if override and override.floor_per_sf_annual is not None:
             stop_per_sf = override.floor_per_sf_annual
-        expense_per_sf = annual_expense_grossed / total_property_area if total_property_area > 0 else Decimal(0)
-        excess_per_sf = max(Decimal(0), expense_per_sf - stop_per_sf)
-        recovery = excess_per_sf * lease.area
+        expense_stop_per_sf = stop_per_sf
+        if (
+            modified_gross_pool_annual is not None
+            and modified_gross_pool_annual > Decimal(0)
+            and modified_gross_pool_share is not None
+            and override is None
+        ):
+            pool_per_sf = (
+                modified_gross_pool_annual / total_property_area
+                if total_property_area > 0
+                else Decimal(0)
+            )
+            excess_per_sf_total = max(Decimal(0), pool_per_sf - stop_per_sf)
+            total_recovery = excess_per_sf_total * lease.area
+            recovery = total_recovery * modified_gross_pool_share
+        else:
+            expense_per_sf = annual_expense_grossed / total_property_area if total_property_area > 0 else Decimal(0)
+            excess_per_sf = max(Decimal(0), expense_per_sf - stop_per_sf)
+            recovery = excess_per_sf * lease.area
 
     else:
-        return Decimal(0)
+        return Decimal(0), {
+            "recovery_type": recovery_type,
+            "pro_rata_share_pct": pro_rata,
+            "base_year_stop_amount": base_stop_used,
+            "expense_stop_per_sf": expense_stop_per_sf,
+            "cap_per_sf_annual": cap_per_sf_annual,
+            "floor_per_sf_annual": floor_per_sf_annual,
+            "admin_fee_pct": admin_fee_pct,
+        }
 
     # Apply per-category cap, floor, admin fee overrides
     if override:
@@ -160,7 +214,15 @@ def _recovery_for_expense(
         if override.admin_fee_pct is not None:
             recovery = recovery * (Decimal(1) + override.admin_fee_pct)
 
-    return recovery
+    return recovery, {
+        "recovery_type": recovery_type,
+        "pro_rata_share_pct": pro_rata,
+        "base_year_stop_amount": base_stop_used,
+        "expense_stop_per_sf": expense_stop_per_sf,
+        "cap_per_sf_annual": cap_per_sf_annual,
+        "floor_per_sf_annual": floor_per_sf_annual,
+        "admin_fee_pct": admin_fee_pct,
+    }
 
 
 def attach_expense_recoveries(
@@ -172,6 +234,7 @@ def attach_expense_recoveries(
     occupancy_by_month: list[Decimal],
     apply_stabilized_gross_up: bool = True,
     stabilized_occupancy_pct: Decimal | None = None,
+    recovery_audit: list[RecoveryAuditEntry] | None = None,
 ) -> None:
     """
     Compute and attach expense_recovery to each MonthlySlice in-place.
@@ -183,20 +246,18 @@ def attach_expense_recoveries(
         if s.is_vacant:
             continue
 
-        # Skip recoveries during free-rent-on-recoveries periods
-        if _is_free_rent_for_recoveries(lease, s.period_start, s.period_end):
-            continue
+        is_recovery_free_rent = _is_free_rent_for_recoveries(lease, s.period_start, s.period_end)
 
         year_number = _fiscal_year_number(analysis, s.period_start)
         actual_occupancy = occupancy_by_month[s.month_index] if s.month_index < len(occupancy_by_month) else Decimal("0.95")
 
-        monthly_recovery = Decimal(0)
+        exp_calc_inputs: list[tuple[ExpenseInput, Decimal, Decimal, str]] = []
+        modified_gross_pool_annual = Decimal(0)
         for exp in expenses:
             if not exp.is_recoverable:
                 continue
             if exp.is_pct_of_egi:
                 continue  # management fees handled in waterfall
-
             annual_exp = _annual_expense(exp, year_number)
             annual_exp_grossed = _grossed_up_expense(
                 annual_exp,
@@ -205,32 +266,75 @@ def attach_expense_recoveries(
                 apply_stabilized_gross_up=apply_stabilized_gross_up,
                 stabilized_occupancy_pct=stabilized_occupancy_pct,
             )
+            eff_recovery_type = _effective_recovery_type(lease, exp.category)
+            exp_calc_inputs.append((exp, annual_exp, annual_exp_grossed, eff_recovery_type))
+            if eff_recovery_type == "modified_gross":
+                modified_gross_pool_annual += annual_exp_grossed
 
-            annual_recovery = _recovery_for_expense(
+        monthly_recovery = Decimal(0)
+        for exp, annual_exp, annual_exp_grossed, eff_recovery_type in exp_calc_inputs:
+            gross_up_factor = (
+                (annual_exp_grossed / annual_exp) if annual_exp > Decimal(0) else Decimal(1)
+            )
+            gross_up_reference = stabilized_occupancy_pct if stabilized_occupancy_pct is not None else exp.gross_up_vacancy_pct
+            mg_share: Decimal | None = None
+            if eff_recovery_type == "modified_gross" and modified_gross_pool_annual > Decimal(0):
+                mg_share = annual_exp_grossed / modified_gross_pool_annual
+
+            annual_recovery, calc_meta = _recovery_for_expense(
                 lease,
                 exp,
                 annual_exp_grossed,
                 total_property_area,
                 year_number,
                 analysis.start_date.year,
+                modified_gross_pool_annual=(
+                    modified_gross_pool_annual if eff_recovery_type == "modified_gross" else None
+                ),
+                modified_gross_pool_share=mg_share,
             )
-            # Prorate monthly (annual / 12), adjusted by the slice's proration factor
-            # The slice's effective_rent already has proration embedded from lease_projector,
-            # but recovery is based on actual lease area regardless of partial months.
-            # Use proration factor embedded in the slice via ratio of base_rent to max monthly.
-            monthly_recovery += annual_recovery / Decimal(12)
+            monthly_recovery_before_proration = annual_recovery / Decimal(12)
 
-        # Scale by proration factor (partial months) — use same factor as base rent
-        # Approximation: if base_rent has proration baked in, scale recoveries proportionally
-        if s.base_rent > Decimal(0):
-            # Derive proration from base rent
-            pass  # monthly_recovery already prorated by dividing annual/12
-        # For partial first/last months, we should also prorate recoveries
-        # Recovery proration: apply same day-count factor
-        # Since we don't store proration separately, we'll scale by checking if
-        # period overlaps partially with lease start/end
-        from src.engine.date_utils import proration_factor as pf
-        pct = pf(s.period_start, s.period_end, lease.start_date, lease.end_date)
-        monthly_recovery = monthly_recovery * pct
+            # For partial first/last months, prorate recoveries by lease day-count overlap.
+            proration = proration_factor(s.period_start, s.period_end, lease.start_date, lease.end_date)
+            monthly_recovery_prorated = monthly_recovery_before_proration * proration
+            monthly_recovery_final = Decimal(0) if is_recovery_free_rent else monthly_recovery_prorated
+
+            monthly_recovery += monthly_recovery_final
+            s.expense_recovery_detail[exp.category] = (
+                s.expense_recovery_detail.get(exp.category, Decimal(0)) + monthly_recovery_final
+            )
+
+            if recovery_audit is not None:
+                recovery_audit.append(
+                    RecoveryAuditEntry(
+                        year=year_number,
+                        period_start=s.period_start,
+                        period_end=s.period_end,
+                        suite_id=s.suite_id,
+                        lease_id=s.lease_id,
+                        tenant_name=s.tenant_name,
+                        expense_category=exp.category,
+                        recovery_type=str(calc_meta["recovery_type"]),
+                        annual_expense_before_gross_up=annual_exp,
+                        annual_expense_after_gross_up=annual_exp_grossed,
+                        actual_occupancy_pct=actual_occupancy,
+                        gross_up_reference_occupancy_pct=gross_up_reference,
+                        gross_up_factor=gross_up_factor,
+                        pro_rata_share_pct=calc_meta["pro_rata_share_pct"],  # type: ignore[arg-type]
+                        base_year_stop_amount=calc_meta["base_year_stop_amount"],  # type: ignore[arg-type]
+                        expense_stop_per_sf=calc_meta["expense_stop_per_sf"],  # type: ignore[arg-type]
+                        cap_per_sf_annual=calc_meta["cap_per_sf_annual"],  # type: ignore[arg-type]
+                        floor_per_sf_annual=calc_meta["floor_per_sf_annual"],  # type: ignore[arg-type]
+                        admin_fee_pct=calc_meta["admin_fee_pct"],  # type: ignore[arg-type]
+                        annual_recovery_before_proration=annual_recovery,
+                        monthly_recovery_before_free_rent=monthly_recovery_prorated,
+                        proration_factor=proration,
+                        is_recovery_free_rent_abatement=is_recovery_free_rent,
+                        monthly_recovery_after_free_rent=monthly_recovery_final,
+                        scenario_weight=s.scenario_weight,
+                        weighted_monthly_recovery=monthly_recovery_final * s.scenario_weight,
+                    )
+                )
 
         s.expense_recovery = monthly_recovery

@@ -192,6 +192,41 @@ class MonthlySlice:
     is_vacant: bool
     scenario_label: str      # "in_place", "renewal", "new_tenant", "vacant"
     scenario_weight: Decimal  # probability weight (1.0 for in-place)
+    expense_recovery_detail: dict[str, Decimal] = field(default_factory=dict)  # category -> monthly recovery
+
+
+@dataclass
+class RecoveryAuditEntry:
+    """
+    One monthly, per-expense-line recovery calculation entry for audit/verification.
+    Amount fields are unweighted unless otherwise noted.
+    """
+    year: int
+    period_start: date
+    period_end: date
+    suite_id: str
+    lease_id: str
+    tenant_name: str | None
+    expense_category: str
+    recovery_type: str
+    annual_expense_before_gross_up: Decimal
+    annual_expense_after_gross_up: Decimal
+    actual_occupancy_pct: Decimal
+    gross_up_reference_occupancy_pct: Decimal | None
+    gross_up_factor: Decimal
+    pro_rata_share_pct: Decimal
+    base_year_stop_amount: Decimal | None
+    expense_stop_per_sf: Decimal | None
+    cap_per_sf_annual: Decimal | None
+    floor_per_sf_annual: Decimal | None
+    admin_fee_pct: Decimal | None
+    annual_recovery_before_proration: Decimal
+    monthly_recovery_before_free_rent: Decimal
+    proration_factor: Decimal
+    is_recovery_free_rent_abatement: bool
+    monthly_recovery_after_free_rent: Decimal
+    scenario_weight: Decimal
+    weighted_monthly_recovery: Decimal
 
 
 @dataclass
@@ -269,3 +304,4 @@ class EngineResult:
     terminal_exit_costs_amount: Decimal = Decimal(0)
     terminal_transfer_tax_amount: Decimal = Decimal(0)
     terminal_transfer_tax_preset: str = "none"
+    recovery_audit: list[RecoveryAuditEntry] = field(default_factory=list)

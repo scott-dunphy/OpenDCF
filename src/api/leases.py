@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from src.db.session import get_session
 import src.models  # ensure all models registered before selectinload
-from src.models.lease import FreeRentPeriod, Lease, LeaseExpenseRecovery, RentStep
+from src.models.lease import FreeRentPeriod, Lease, LeaseExpenseRecovery, RentStep, Tenant
 from src.models.property import Suite
 from src.schemas.lease import (
     FreeRentPeriodCreate,
@@ -44,6 +44,39 @@ async def _get_lease_or_404(lease_id: str, db: AsyncSession) -> Lease:
     return lease
 
 
+async def _get_suite_or_404(suite_id: str, db: AsyncSession) -> Suite:
+    result = await db.execute(select(Suite).where(Suite.id == suite_id))
+    suite = result.scalar_one_or_none()
+    if suite is None:
+        raise HTTPException(status_code=404, detail="Suite not found")
+    return suite
+
+
+async def _validate_tenant_for_suite(
+    db: AsyncSession,
+    tenant_id: str | None,
+    suite: Suite,
+) -> None:
+    if tenant_id is None:
+        return
+    result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    tenant = result.scalar_one_or_none()
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    if tenant.property_id is None:
+        # Backward compatibility for legacy global tenants: claim to this property.
+        tenant.property_id = suite.property_id
+        await db.flush()
+        return
+
+    if tenant.property_id != suite.property_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Tenant belongs to a different property",
+        )
+
+
 async def _ensure_no_overlap(
     db: AsyncSession,
     suite_id: str,
@@ -72,9 +105,8 @@ async def create_lease(
     body: LeaseCreate,
     db: AsyncSession = Depends(get_session),
 ) -> LeaseRead:
-    result = await db.execute(select(Suite).where(Suite.id == suite_id))
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Suite not found")
+    suite = await _get_suite_or_404(suite_id, db)
+    await _validate_tenant_for_suite(db, body.tenant_id, suite)
     await _ensure_no_overlap(db, suite_id, body.lease_start_date, body.lease_end_date)
     lease = Lease(suite_id=suite_id, **body.model_dump())
     db.add(lease)
@@ -111,6 +143,7 @@ async def update_lease(
     db: AsyncSession = Depends(get_session),
 ) -> LeaseRead:
     lease = await _get_lease_or_404(lease_id, db)
+    suite = await _get_suite_or_404(lease.suite_id, db)
     new_start = body.lease_start_date or lease.lease_start_date
     new_end = body.lease_end_date or lease.lease_end_date
     if new_end <= new_start:
@@ -125,6 +158,8 @@ async def update_lease(
         lease_end_date=new_end,
         exclude_lease_id=lease.id,
     )
+    if "tenant_id" in body.model_dump(exclude_none=True):
+        await _validate_tenant_for_suite(db, body.tenant_id, suite)
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(lease, field, value)
     await db.commit()

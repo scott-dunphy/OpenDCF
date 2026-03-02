@@ -10,9 +10,10 @@ cash flows following the standard CRE waterfall:
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import date
 from decimal import Decimal
 
-from src.engine.date_utils import add_months
+from src.engine.date_utils import add_months, end_of_month
 from src.engine.growth import expense_at_year, market_rent_at_year
 from src.engine.types import (
     AnalysisPeriod,
@@ -148,6 +149,45 @@ def _avg_occupancy_for_fiscal_year(
     return sum(occ_values) / Decimal(str(len(occ_values)))
 
 
+def _full_fiscal_year_bounds(anchor_date: date, fiscal_year_end_month: int) -> tuple[date, date]:
+    """
+    Return the unclipped fiscal-year start/end that contains `anchor_date`.
+    """
+    fy_end = end_of_month(date(anchor_date.year, fiscal_year_end_month, 1))
+    if anchor_date > fy_end:
+        fy_end = end_of_month(date(anchor_date.year + 1, fiscal_year_end_month, 1))
+
+    start_month = 1 if fiscal_year_end_month == 12 else fiscal_year_end_month + 1
+    start_year = fy_end.year if fiscal_year_end_month == 12 else fy_end.year - 1
+    fy_start = date(start_year, start_month, 1)
+    return fy_start, fy_end
+
+
+def _fiscal_year_coverage_factor(fy: FiscalYear, fiscal_year_end_month: int) -> Decimal:
+    """
+    Fraction of a full fiscal year represented by this (possibly stub) FY.
+
+    Uses month-level proration so full months contribute 1.0 and partial months
+    contribute day-fractions. A full fiscal year returns 1.0.
+    """
+    full_start, _ = _full_fiscal_year_bounds(fy.start_date, fiscal_year_end_month)
+    covered_months = Decimal(0)
+
+    for i in range(12):
+        month_start = add_months(full_start, i)
+        month_end = end_of_month(month_start)
+        overlap_start = max(month_start, fy.start_date)
+        overlap_end = min(month_end, fy.end_date)
+        if overlap_start > overlap_end:
+            continue
+        covered_days = Decimal(str((overlap_end - overlap_start).days + 1))
+        month_days = Decimal(str((month_end - month_start).days + 1))
+        covered_months += covered_days / month_days
+
+    factor = covered_months / Decimal(12)
+    return max(Decimal(0), min(Decimal(1), factor))
+
+
 def build_annual_waterfall(
     suite_slices: dict[str, list[MonthlySlice]],  # suite_id -> flat list of all slices
     suites: list[SuiteInput],
@@ -183,6 +223,7 @@ def build_annual_waterfall(
 
     for fy in analysis.fiscal_years:
         year = fy.year_number
+        fy_coverage_factor = _fiscal_year_coverage_factor(fy, analysis.fiscal_year_end_month)
 
         # Bucket monthly slices for this fiscal year
         gpr = Decimal(0)
@@ -267,10 +308,10 @@ def build_annual_waterfall(
         scheduled_rent = gpr + free_rent_total  # effective rent after free rent
 
         # Other income items (parking, antenna, storage, etc.) with growth
-        oi_total = other_income_annual  # legacy flat fallback
+        oi_total = other_income_annual * fy_coverage_factor  # legacy flat fallback
         oi_detail: dict[str, Decimal] = {}
         for oi in (other_income_items or []):
-            amt = expense_at_year(oi.base_amount, oi.growth_rate, year)
+            amt = expense_at_year(oi.base_amount, oi.growth_rate, year) * fy_coverage_factor
             oi_total += amt
             oi_detail[oi.category] = oi_detail.get(oi.category, Decimal(0)) + amt
 
@@ -287,7 +328,7 @@ def build_annual_waterfall(
         opex = Decimal(0)
         exp_detail: dict[str, Decimal] = {}
         for exp in non_egi_expenses:
-            annual_exp = expense_at_year(exp.base_amount, exp.growth_rate, year)
+            annual_exp = expense_at_year(exp.base_amount, exp.growth_rate, year) * fy_coverage_factor
             amt = _grossed_up_opex_amount(
                 annual_exp,
                 exp,
@@ -305,7 +346,7 @@ def build_annual_waterfall(
             exp_detail["management_fee"] = exp_detail.get("management_fee", Decimal(0)) + mgmt_fee
 
         noi = egi - opex
-        cap_reserves = -(params.capital_reserves_per_unit * params.total_property_area)
+        cap_reserves = -(params.capital_reserves_per_unit * params.total_property_area * fy_coverage_factor)
 
         # Building improvements: scheduled CapEx projects spread across months
         bldg_improvements = Decimal(0)

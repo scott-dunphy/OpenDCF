@@ -126,6 +126,23 @@ class TestLeaseCRUD:
         })
         assert resp.status_code == 409
 
+    async def test_create_lease_with_cross_property_tenant_rejected(self, client: AsyncClient):
+        _, suite_a = await _create_suite(client)
+        prop_b, _ = await _create_suite(client)
+        tenant = await client.post(f"/api/v1/properties/{prop_b}/tenants", json={"name": "Wrong Property Tenant"})
+        assert tenant.status_code == 201
+
+        resp = await client.post(f"/api/v1/suites/{suite_a}/leases", json={
+            "tenant_id": tenant.json()["id"],
+            "lease_start_date": "2025-01-01",
+            "lease_end_date": "2029-12-31",
+            "base_rent_per_unit": "30.00",
+            "escalation_type": "flat",
+            "recovery_type": "nnn",
+        })
+        assert resp.status_code == 400
+        assert "different property" in resp.json()["detail"]
+
     async def test_update_lease_to_overlap_rejected(self, client: AsyncClient):
         _, suite_id = await _create_suite(client)
         await _create_lease(

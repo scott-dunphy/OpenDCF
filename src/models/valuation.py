@@ -57,5 +57,6 @@ class Valuation(Base, UUIDPrimaryKey, TimestampMixin):
     result_terminal_transfer_tax_preset: Mapped[str | None] = mapped_column(String(64))
     result_cash_flows_json: Mapped[str | None] = mapped_column(Text)  # JSON blob
     result_tenant_cash_flows_json: Mapped[str | None] = mapped_column(Text)  # JSON blob
+    result_recovery_audit_json: Mapped[str | None] = mapped_column(Text)  # JSON blob
 
     property: Mapped["Property"] = relationship(back_populates="valuations")  # type: ignore[name-defined]

@@ -110,6 +110,14 @@ input, select, textarea { font-family: inherit; }
     color: var(--accent);
 }
 
+.topnav-logo {
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    object-fit: cover;
+    display: block;
+}
+
 .topnav-right {
     margin-left: auto;
     display: flex;
@@ -265,6 +273,68 @@ input, select, textarea { font-family: inherit; }
     font-weight: 600;
     color: var(--text);
     letter-spacing: -0.01em;
+}
+
+/* --- Help / Glossary --- */
+.help-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 16px;
+}
+
+.help-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 18px 16px;
+    box-shadow: var(--shadow-sm);
+}
+
+.help-card h3 {
+    font-size: 1rem;
+    margin-bottom: 12px;
+    color: var(--text);
+    letter-spacing: -0.01em;
+}
+
+.help-row {
+    display: grid;
+    grid-template-columns: 170px 1fr;
+    gap: 10px;
+    padding: 7px 0;
+    border-top: 1px solid var(--border-light);
+    font-size: 0.85rem;
+}
+
+.help-row strong {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.help-row span {
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+.help-row code,
+.help-example code {
+    font-size: 0.8rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1px 6px;
+    color: var(--text);
+}
+
+.help-example {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
 }
 
 /* --- Property Cards Grid --- */
@@ -1205,4 +1275,5 @@ input, select, textarea { font-family: inherit; }
     .property-grid { grid-template-columns: 1fr; }
     .kpi-row { grid-template-columns: 1fr 1fr; }
     .topnav-inner { padding: 0 16px; }
+    .help-row { grid-template-columns: 1fr; gap: 4px; }
 }

@@ -11,6 +11,9 @@ from src.schemas.common import EscalationType, LeaseType, RecoveryType
 class Tenant(Base, UUIDPrimaryKey, TimestampMixin):
     __tablename__ = "tenants"
 
+    property_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("properties.id", ondelete="CASCADE"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(255))
     credit_rating: Mapped[str | None] = mapped_column(String(20))
     industry: Mapped[str | None] = mapped_column(String(100))
@@ -19,6 +22,7 @@ class Tenant(Base, UUIDPrimaryKey, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text)
     comment: Mapped[str | None] = mapped_column(Text)
 
+    property: Mapped["Property | None"] = relationship(back_populates="tenants")  # type: ignore[name-defined]
     leases: Mapped[list["Lease"]] = relationship(back_populates="tenant")
 
 

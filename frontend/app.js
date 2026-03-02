@@ -584,7 +584,6 @@ const TENANT_FIELDS = [
     { key: 'industry', label: 'Industry', type: 'text', half: true },
     { key: 'contact_name', label: 'Contact Name', type: 'text', half: true },
     { key: 'contact_email', label: 'Contact Email', type: 'text', half: true },
-    { key: 'notes', label: 'Notes', type: 'textarea' },
     { key: 'comment', label: 'Comment / Source Note', type: 'textarea' },
 ];
 
@@ -592,13 +591,12 @@ const ESCALATION_TYPES = ['flat', 'pct_annual', 'cpi', 'fixed_step'];
 const RECOVERY_TYPES = ['nnn', 'full_service_gross', 'modified_gross', 'base_year_stop', 'none'];
 const LEASE_TYPES = ['in_place', 'market', 'month_to_month'];
 
-function buildLeaseFields(suites, tenants, onNewTenant, recoveryStructures) {
+function buildLeaseFields(suites, tenants, onNewTenant, recoveryStructures, includeSuite = true) {
     const rsOptions = [
         { value: '', label: '— None —' },
         ...(recoveryStructures || []).map(rs => ({ value: rs.id, label: rs.name }))
     ];
-    return [
-        { key: 'suite_id', label: 'Suite', type: 'select', required: true, options: suites.map(s => ({ value: s.id, label: `${s.suite_name} (${fmt.num(s.area)} SF)` })) },
+    const fields = [
         { key: 'tenant_id', label: 'Tenant', type: 'select', options: [{ value: '', label: '— None (Vacant) —' }, ...tenants.map(t => ({ value: t.id, label: t.name }))], afterLabel: onNewTenant ? `<button type="button" class="form-inline-link" id="inlineNewTenant">+ New Tenant</button>` : undefined },
         { key: 'lease_type', label: 'Lease Type', type: 'select', options: LEASE_TYPES, default: 'in_place', half: true },
         { key: 'comment', label: 'Comment / Source Note', type: 'textarea' },
@@ -626,6 +624,30 @@ function buildLeaseFields(suites, tenants, onNewTenant, recoveryStructures) {
         { key: 'renewal_probability', label: 'Renewal Probability', type: 'number', step: '0.05', half: true, helpText: 'Enter percent (0-100)' },
         { key: 'renewal_rent_spread_pct', label: 'Renewal Rent Spread', type: 'number', step: '0.01', half: true, helpText: 'e.g. 5.00 = 5% above market' },
     ];
+    if (includeSuite) {
+        fields.unshift({
+            key: 'suite_id',
+            label: 'Suite',
+            type: 'select',
+            required: true,
+            options: suites.map(s => ({ value: s.id, label: `${s.suite_name} (${fmt.num(s.area)} SF)` })),
+        });
+    }
+    fields.forEach((f) => {
+        if (f.key === 'recovery_structure_id') {
+            f.helpText = 'Assign a template. Leave blank to set recovery manually below.';
+        }
+        if (f.key === 'recovery_type' || f.key === 'pro_rata_share_pct') {
+            f.visibleWhen = (v) => !v.recovery_structure_id;
+        }
+        if (f.key === 'base_year' || f.key === 'base_year_stop_amount') {
+            f.visibleWhen = (v) => !v.recovery_structure_id && v.recovery_type === 'base_year_stop';
+        }
+        if (f.key === 'expense_stop_per_sf') {
+            f.visibleWhen = (v) => !v.recovery_structure_id && v.recovery_type === 'modified_gross';
+        }
+    });
+    return fields;
 }
 
 const STANDARD_EXPENSE_CATEGORIES = ['real_estate_taxes', 'insurance', 'cam', 'utilities', 'management_fee', 'repairs_maintenance', 'general_admin', 'other'];
@@ -717,14 +739,13 @@ function openUnitMarketQuickSetup(propertyId, property, marketProfiles) {
 
     const fields = [
         { key: 'apply_same_all', label: 'Apply same assumptions to all unit types', type: 'checkbox', default: false },
+        { key: 'same_rent', label: 'Market Rent ($/Unit/mo, all types)', type: 'number', step: '0.01', half: true, visibleWhen: v => v.apply_same_all },
         { key: 'same_growth', label: 'Rent Growth (all types)', type: 'number', step: '0.005', default: 0.03, half: true, helpText: 'Enter percent', visibleWhen: v => v.apply_same_all },
         { key: 'same_vacancy', label: 'Vacancy % (all types)', type: 'number', step: '0.005', default: 0.05, half: true, helpText: 'Enter percent', visibleWhen: v => v.apply_same_all },
         { key: 'same_credit', label: 'Credit Loss % (all types)', type: 'number', step: '0.005', default: 0.01, half: true, helpText: 'Enter percent', visibleWhen: v => v.apply_same_all },
         { key: 'same_renewal', label: 'Renewal Prob (all types)', type: 'number', step: '0.05', default: 0.65, half: true, helpText: 'Used as turnover proxy', visibleWhen: v => v.apply_same_all },
         { key: 'same_turnover', label: 'Turnover Cost ($/Unit, all types)', type: 'number', step: '0.01', default: 0, half: true, visibleWhen: v => v.apply_same_all },
         { key: 'same_comment', label: 'Comment / Source Note (all types)', type: 'textarea', visibleWhen: v => v.apply_same_all },
-        { key: 'same_rent_all', label: 'Use one market rent for all unit types', type: 'checkbox', default: false, visibleWhen: v => v.apply_same_all },
-        { key: 'same_rent', label: 'Market Rent ($/Unit/mo, all types)', type: 'number', step: '0.01', half: true, visibleWhen: v => v.apply_same_all && v.same_rent_all },
     ];
 
     spaceTypes.forEach((st, i) => {
@@ -738,7 +759,7 @@ function openUnitMarketQuickSetup(propertyId, property, marketProfiles) {
             step: '0.01',
             half: true,
             default: mla ? parseFloat(mla.market_rent_per_unit) : '',
-            visibleWhen: v => !(v.apply_same_all && v.same_rent_all),
+            visibleWhen: v => !v.apply_same_all,
         });
         fields.push({
             key: `growth_${st}`,
@@ -810,8 +831,9 @@ function openUnitMarketQuickSetup(propertyId, property, marketProfiles) {
             for (const st of spaceTypes) {
                 const existing = mlaByType[st];
                 const sharedMode = !!data.apply_same_all;
-                const sameRentMode = sharedMode && !!data.same_rent_all;
-                const rent = sameRentMode ? data.same_rent : data[`rent_${st}`];
+                const rent = sharedMode
+                    ? ((data.same_rent != null && data.same_rent !== '') ? data.same_rent : existing?.market_rent_per_unit)
+                    : data[`rent_${st}`];
                 if (rent == null || rent === '') continue;
                 const growth = sharedMode
                     ? (data.same_growth ?? parseFloat(existing?.rent_growth_rate_pct ?? 0.03))
@@ -1548,6 +1570,11 @@ async function propertyView({ id }) {
     const allLeases = property.suites.flatMap(s =>
         (leasesBySuite[s.id] || []).map(l => ({ ...l, suite: s }))
     );
+    const suiteAreaById = {};
+    (property.suites || []).forEach(s => { suiteAreaById[s.id] = parseFloat(s.area || 0); });
+    const completedValuations = [...valuations]
+        .filter(v => v.status === 'completed')
+        .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
 
     $app().innerHTML = `
         <div class="property-header">
@@ -1593,6 +1620,7 @@ async function propertyView({ id }) {
             ${simplifyUnitAssumptions ? '' : '<button class="tab-item" data-tab="market">Market Profiles</button>'}
             <button class="tab-item" data-tab="capital">Capital Projects</button>
             <button class="tab-item" data-tab="recovery">Recovery Structures</button>
+            <button class="tab-item" data-tab="recovery-audit">Tenant Recovery Audit</button>
             <button class="tab-item" data-tab="valuations">Valuations</button>
         </div>
 
@@ -1614,6 +1642,9 @@ async function propertyView({ id }) {
         <div class="tab-content" id="tab-recovery">
             ${renderRecoveryStructuresTab(recoveryStructures, id)}
         </div>
+        <div class="tab-content" id="tab-recovery-audit">
+            ${renderRecoveryAuditTab(completedValuations)}
+        </div>
         <div class="tab-content" id="tab-valuations">
             ${renderValuationsTab(valuations, id)}
         </div>`;
@@ -1628,6 +1659,190 @@ async function propertyView({ id }) {
         const content = document.getElementById('tab-' + tab.dataset.tab);
         if (content) content.classList.add('active');
     });
+
+    // Recovery Audit tab interactions
+    const auditValuationSel = document.getElementById('recoveryAuditValuationSelect');
+    const auditTenantSel = document.getElementById('recoveryAuditTenantSelect');
+    const auditSummaryEl = document.getElementById('recoveryAuditSummary');
+    const auditTableEl = document.getElementById('recoveryAuditTable');
+    const openAuditValuationBtn = document.getElementById('openAuditValuationBtn');
+    let auditRows = [];
+
+    function renderAuditRows(rows, tenantFilter) {
+        const all = Array.isArray(rows) ? rows : [];
+        const filtered = (tenantFilter && tenantFilter !== '__all__')
+            ? all.filter(r => (r.tenant_name || 'Vacant/Spec') === tenantFilter)
+            : all;
+        const propertyArea = parseFloat(property.total_area);
+        const mgPoolAnnualByKey = {};
+        filtered.forEach((r) => {
+            if (r.recovery_type !== 'modified_gross') return;
+            const key = `${r.year}|${r.period_start}|${r.suite_id}|${r.lease_id}`;
+            mgPoolAnnualByKey[key] = (mgPoolAnnualByKey[key] || 0) + parseFloat(r.annual_expense_after_gross_up || 0);
+        });
+        const totalWeighted = filtered.reduce((sum, r) => sum + parseFloat(r.weighted_monthly_recovery || 0), 0);
+        if (auditSummaryEl) {
+            auditSummaryEl.textContent = `${filtered.length} row${filtered.length === 1 ? '' : 's'} • Weighted recovery total ${fmt.currencyExact(totalWeighted)}`;
+        }
+        if (!auditTableEl) return;
+        if (filtered.length === 0) {
+            auditTableEl.innerHTML = '<div class="empty-state"><h3>No audit rows for this tenant</h3><p>Choose another tenant or valuation.</p></div>';
+            return;
+        }
+
+        const impl = (r) => {
+            if (r.recovery_type === 'nnn') return 'NNN: grossed expense × pro rata share';
+            if (r.recovery_type === 'base_year_stop') {
+                return `Base-year stop: max(0, grossed expense − stop ${r.base_year_stop_amount != null ? fmt.currencyExact(r.base_year_stop_amount) : '$0'}) × pro rata`;
+            }
+            if (r.recovery_type === 'modified_gross') {
+                return `Modified gross: pooled modified-gross expenses use stop/SF ${r.expense_stop_per_sf != null ? fmt.perSf(r.expense_stop_per_sf, property.area_unit) : '$0'}; excess allocated by category share`;
+            }
+            if (r.recovery_type === 'full_service_gross' || r.recovery_type === 'none') return 'No recovery';
+            return fmt.typeLabel(r.recovery_type);
+        };
+
+        const body = filtered.map((r) => `<tr>
+            <td>${r.year}</td>
+            <td>${fmt.date(r.period_start)}</td>
+            <td>${r.suite_name || r.suite_id}</td>
+            <td>${r.tenant_name || 'Vacant/Spec'}</td>
+            <td class="mono right">${fmt.num(suiteAreaById[r.suite_id])}</td>
+            <td>${fmt.typeLabel(r.expense_category)}</td>
+            <td>${fmt.typeLabel(r.recovery_type)}</td>
+            <td>${impl(r)}</td>
+            <td class="mono right">${(() => {
+                const area = parseFloat(property.total_area);
+                if (!Number.isFinite(area) || area <= 0) return '—';
+                return fmt.perSf(parseFloat(r.annual_expense_before_gross_up || 0) / area, property.area_unit);
+            })()}</td>
+            <td class="mono right">${(() => {
+                const area = parseFloat(property.total_area);
+                if (!Number.isFinite(area) || area <= 0) return '—';
+                return fmt.perSf(parseFloat(r.annual_expense_after_gross_up || 0) / area, property.area_unit);
+            })()}</td>
+            <td class="mono right">${(() => {
+                if (r.recovery_type !== 'modified_gross') return '—';
+                if (!Number.isFinite(propertyArea) || propertyArea <= 0) return '—';
+                const key = `${r.year}|${r.period_start}|${r.suite_id}|${r.lease_id}`;
+                const poolAnnual = mgPoolAnnualByKey[key] || 0;
+                return fmt.perSf(poolAnnual / propertyArea, property.area_unit);
+            })()}</td>
+            <td class="mono right">${(() => {
+                if (r.recovery_type !== 'modified_gross') return '—';
+                if (!Number.isFinite(propertyArea) || propertyArea <= 0) return '—';
+                const stop = parseFloat(r.expense_stop_per_sf || 0);
+                const key = `${r.year}|${r.period_start}|${r.suite_id}|${r.lease_id}`;
+                const poolAnnual = mgPoolAnnualByKey[key] || 0;
+                const poolPerSf = poolAnnual / propertyArea;
+                const excess = Math.max(0, poolPerSf - stop);
+                return fmt.perSf(excess, property.area_unit);
+            })()}</td>
+            <td class="mono right">${(() => {
+                if (r.recovery_type !== 'modified_gross') return '—';
+                const key = `${r.year}|${r.period_start}|${r.suite_id}|${r.lease_id}`;
+                const poolAnnual = mgPoolAnnualByKey[key] || 0;
+                if (!Number.isFinite(poolAnnual) || poolAnnual <= 0) return '—';
+                const catAnnual = parseFloat(r.annual_expense_after_gross_up || 0);
+                return fmt.pct(catAnnual / poolAnnual);
+            })()}</td>
+            <td class="mono right">${fmt.currencyExact(r.base_year_stop_amount)}</td>
+            <td class="mono right">${r.expense_stop_per_sf != null ? fmt.perSf(r.expense_stop_per_sf, property.area_unit) : '—'}</td>
+            <td class="mono right">${r.cap_per_sf_annual != null ? fmt.perSf(r.cap_per_sf_annual, property.area_unit) : '—'}</td>
+            <td class="mono right">${r.floor_per_sf_annual != null ? fmt.perSf(r.floor_per_sf_annual, property.area_unit) : '—'}</td>
+            <td class="mono right">${r.admin_fee_pct != null ? fmt.pct(r.admin_fee_pct) : '—'}</td>
+            <td class="mono right">${fmt.pct(r.pro_rata_share_pct)}</td>
+            <td class="mono right">${fmt.currencyExact(r.annual_recovery_before_proration)}</td>
+            <td class="mono right">${fmt.pct(r.proration_factor)}</td>
+            <td>${r.is_recovery_free_rent_abatement ? '<span class="negative">Yes</span>' : 'No'}</td>
+            <td class="mono right"><strong>${fmt.currencyExact(r.weighted_monthly_recovery)}</strong></td>
+        </tr>`).join('');
+        auditTableEl.innerHTML = `
+            <div class="data-table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Year</th>
+                            <th>Month</th>
+                            <th>Suite</th>
+                            <th>Tenant</th>
+                            <th class="right">Tenant SF</th>
+                            <th>Expense</th>
+                            <th>Recovery Type</th>
+                            <th>Implementation</th>
+                            <th class="right">Actual Exp/SF (Pre GU)</th>
+                            <th class="right">Actual Exp/SF (Post GU)</th>
+                            <th class="right">Pooled Exp/SF</th>
+                            <th class="right">Excess Over Stop/SF</th>
+                            <th class="right">Category Share %</th>
+                            <th class="right">Base Stop $</th>
+                            <th class="right">Stop/SF</th>
+                            <th class="right">Cap/SF</th>
+                            <th class="right">Floor/SF</th>
+                            <th class="right">Admin %</th>
+                            <th class="right">Pro Rata</th>
+                            <th class="right">Annual Recovery</th>
+                            <th class="right">Proration</th>
+                            <th>FR Abated</th>
+                            <th class="right">Weighted Monthly</th>
+                        </tr>
+                    </thead>
+                    <tbody>${body}</tbody>
+                </table>
+            </div>`;
+    }
+
+    async function loadRecoveryAudit() {
+        if (!auditValuationSel || !auditTenantSel || !auditTableEl) return;
+        const vid = auditValuationSel.value;
+        if (!vid) {
+            auditRows = [];
+            auditTenantSel.innerHTML = '<option value="__all__">All Tenants</option>';
+            renderAuditRows([], '__all__');
+            return;
+        }
+        auditTableEl.innerHTML = '<div class="empty-state"><h3>Loading audit…</h3></div>';
+        try {
+            auditRows = await api.get(`/valuations/${vid}/reports/recovery-audit`);
+        } catch (err) {
+            auditRows = [];
+            auditTableEl.innerHTML = `<div class="empty-state"><h3>Could not load recovery audit</h3><p>${err.message}</p></div>`;
+            return;
+        }
+        const tenantNames = [...new Set(auditRows.map(r => r.tenant_name || 'Vacant/Spec'))].sort((a, b) => a.localeCompare(b));
+        auditTenantSel.innerHTML = [
+            '<option value="__all__">All Tenants</option>',
+            ...tenantNames.map(name => `<option value="${name.replace(/"/g, '&quot;')}">${name}</option>`),
+        ].join('');
+        renderAuditRows(auditRows, '__all__');
+    }
+
+    if (auditValuationSel && auditTenantSel) {
+        auditValuationSel.addEventListener('change', () => {
+            if (openAuditValuationBtn) openAuditValuationBtn.setAttribute('data-valuation-id', auditValuationSel.value || '');
+            loadRecoveryAudit();
+        });
+        auditTenantSel.addEventListener('change', () => renderAuditRows(auditRows, auditTenantSel.value));
+        if (openAuditValuationBtn) {
+            openAuditValuationBtn.addEventListener('click', () => {
+                const vid = openAuditValuationBtn.getAttribute('data-valuation-id');
+                if (vid) location.hash = `#/valuation/${vid}`;
+            });
+        }
+        const pendingValuationId = sessionStorage.getItem('opendcf_recovery_audit_valuation_id');
+        if (pendingValuationId && [...auditValuationSel.options].some(o => o.value === pendingValuationId)) {
+            auditValuationSel.value = pendingValuationId;
+        }
+        loadRecoveryAudit();
+        sessionStorage.removeItem('opendcf_recovery_audit_valuation_id');
+    }
+
+    const pendingTab = sessionStorage.getItem('opendcf_property_tab');
+    if (pendingTab) {
+        const tabBtn = document.querySelector(`#tabBar .tab-item[data-tab="${pendingTab}"]`);
+        if (tabBtn) tabBtn.click();
+        sessionStorage.removeItem('opendcf_property_tab');
+    }
 
     // Run valuation button
     document.querySelectorAll('[data-run-valuation]').forEach(btn => {
@@ -1687,11 +1902,6 @@ async function propertyView({ id }) {
     const editRentUnitBtn = document.getElementById('editRentUnitBtn');
     if (editRentUnitBtn) {
         editRentUnitBtn.addEventListener('click', () => openUnitInPlaceRentEditor(id, allLeases));
-    }
-
-    const editGrowthBtn = document.getElementById('editGrowthBtn');
-    if (editGrowthBtn) {
-        editGrowthBtn.addEventListener('click', () => openUnitMarketQuickSetup(id, property, marketProfiles));
     }
 
     // Quick market setup in Market tab for unit-type properties
@@ -1754,12 +1964,18 @@ async function propertyView({ id }) {
 
     // New Lease
     // Helper: open lease form with inline tenant creation
-    function openLeaseForm(title, initialValues, onSubmit) {
+    function openLeaseForm(title, initialValues, onSubmit, opts = {}) {
         (async () => {
             let tenants = [];
-            try { tenants = await api.get('/tenants'); } catch {}
+            try { tenants = await api.get(`/properties/${id}/tenants`); } catch {}
             const onNewTenant = true;
-            const leaseFields = buildLeaseFields(property.suites, tenants, onNewTenant, recoveryStructures);
+            const leaseFields = buildLeaseFields(
+                property.suites,
+                tenants,
+                onNewTenant,
+                recoveryStructures,
+                opts.includeSuite !== false
+            );
             const formOverlay = showFormModal({
                 title,
                 fields: leaseFields,
@@ -1777,7 +1993,7 @@ async function propertyView({ id }) {
                             title: 'New Tenant',
                             fields: TENANT_FIELDS,
                             onSubmit: async (data, tenantOverlay) => {
-                                const newTenant = await api.post('/tenants', data);
+                                const newTenant = await api.post(`/properties/${id}/tenants`, data);
                                 tenantOverlay.remove();
                                 toast('Tenant created', 'success');
                                 // Refresh the tenant dropdown in the lease form
@@ -1834,14 +2050,13 @@ async function propertyView({ id }) {
             e.stopPropagation();
             const lid = btn.dataset.editLease;
             const lease = allLeases.find(l => l.id === lid);
-            openLeaseForm('Edit Lease', { ...lease, suite_id: lease.suite.id }, async (data, overlay) => {
-                delete data.suite_id;  // Can't change suite on edit
+            openLeaseForm('Edit Lease', lease, async (data, overlay) => {
                 if (data.tenant_id === '') data.tenant_id = null;
                 await api.put(`/leases/${lid}`, data);
                 overlay.remove();
                 toast('Lease updated', 'success');
                 propertyView({ id });
-            });
+            }, { includeSuite: false });
         });
     });
 
@@ -2261,7 +2476,7 @@ function renderRentRollTab(property, allLeases, marketProfiles) {
         ? `<th class="right">${rentLabel} <button class="btn-icon" id="editRentUnitBtn" title="Edit in-place rents" style="vertical-align:middle">${icons.edit}</button></th>`
         : `<th class="right">${rentLabel}</th>`;
     const mktGrowthHeader = isUnit
-        ? `<th class="right">Growth <button class="btn-icon" id="editGrowthBtn" title="Edit market growth" style="vertical-align:middle">${icons.edit}</button></th>`
+        ? `<th class="right">Growth</th>`
         : '';
 
     return `
@@ -2586,21 +2801,180 @@ function renderValuationsTab(valuations, propertyId) {
 }
 
 
+function renderRecoveryAuditTab(completedValuations) {
+    if (!completedValuations || completedValuations.length === 0) {
+        return `
+            <div class="section-header">
+                <h3 class="section-title">Tenant Recovery Audit</h3>
+            </div>
+            <div class="empty-state">
+                <h3>No completed valuations</h3>
+                <p>Run at least one valuation to generate tenant recovery audit rows.</p>
+            </div>`;
+    }
+
+    const valuationOptions = completedValuations.map(v => (
+        `<option value="${v.id}">${v.name} (${fmt.dateFull(v.updated_at || v.created_at)})</option>`
+    )).join('');
+
+    return `
+        <div class="section-header">
+            <h3 class="section-title">Tenant Recovery Audit</h3>
+            <button class="btn btn-secondary btn-sm" id="openAuditValuationBtn" data-valuation-id="${completedValuations[0].id}">Open Valuation</button>
+        </div>
+        <div class="page-subtitle" style="margin-bottom:12px">
+            Select a valuation and tenant to review recoveries by expense line, including stops, caps/floors, admin fees, proration, and free-rent abatement.
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+            <div>
+                <label for="recoveryAuditValuationSelect" style="display:block;font-size:0.78rem;color:var(--text-tertiary);margin-bottom:4px">Valuation</label>
+                <select id="recoveryAuditValuationSelect" class="form-input" style="min-width:280px">${valuationOptions}</select>
+            </div>
+            <div>
+                <label for="recoveryAuditTenantSelect" style="display:block;font-size:0.78rem;color:var(--text-tertiary);margin-bottom:4px">Tenant</label>
+                <select id="recoveryAuditTenantSelect" class="form-input" style="min-width:220px">
+                    <option value="__all__">All Tenants</option>
+                </select>
+            </div>
+        </div>
+        <div id="recoveryAuditSummary" style="font-size:0.84rem;color:var(--text-secondary);margin-bottom:10px">Select a valuation to load audit rows.</div>
+        <div id="recoveryAuditTable"></div>`;
+}
+
+
+// ─── Help / Glossary ──────────────────────────────────────────
+
+async function helpView() {
+    setBreadcrumb([
+        { label: 'Dashboard', href: '#/dashboard' },
+        { label: 'Help & Glossary' }
+    ]);
+
+    $app().innerHTML = `
+        <div class="page-header">
+            <h1 class="page-title">Help & Glossary</h1>
+            <p class="page-subtitle">Formulas, definitions, and worked examples for key calculations in OpenDCF.</p>
+        </div>
+
+        <div class="help-grid">
+            <section class="help-card">
+                <h3>Revenue Waterfall</h3>
+                <div class="help-row"><strong>Gross Potential Rent (GPR)</strong><span>Contract base rent before free rent/vacancy.</span></div>
+                <div class="help-row"><strong>Scheduled Rent</strong><span><code>GPR + Free Rent</code> (free rent is negative).</span></div>
+                <div class="help-row"><strong>Gross Potential Income (GPI)</strong><span><code>Scheduled Rent + Recoveries + % Rent + Other Income</code>.</span></div>
+                <div class="help-row"><strong>Effective Gross Income (EGI)</strong><span><code>GPI - General Vacancy - Credit Loss</code>.</span></div>
+                <div class="help-example">
+                    Example: If <code>GPR=1,000,000</code>, <code>Free Rent=-50,000</code>, <code>Recoveries=120,000</code>, <code>Other Income=30,000</code>, <code>General Vacancy=95,000</code>, <code>Credit Loss=19,000</code>, then <code>EGI=986,000</code>.
+                </div>
+            </section>
+
+            <section class="help-card">
+                <h3>NOI, CFBD, and Debt</h3>
+                <div class="help-row"><strong>Operating Expenses</strong><span>Fixed expenses plus management fee (% of EGI if configured).</span></div>
+                <div class="help-row"><strong>NOI</strong><span><code>EGI - Operating Expenses</code>.</span></div>
+                <div class="help-row"><strong>CFBD</strong><span><code>NOI + TI + LC + Capital Reserves + Building Improvements</code> (cost items are negative).</span></div>
+                <div class="help-row"><strong>Levered Cash Flow</strong><span><code>CFBD - Debt Service</code>.</span></div>
+                <div class="help-example">
+                    Example: <code>EGI=986,000</code>, <code>OpEx=320,000</code> gives <code>NOI=666,000</code>. If TI/LC/Reserves/CapEx total <code>-140,000</code>, then <code>CFBD=526,000</code>.
+                </div>
+            </section>
+
+            <section class="help-card">
+                <h3>Expense Recoveries</h3>
+                <div class="help-row"><strong>NNN</strong><span><code>Recovery = Expense × Pro Rata Share</code>.</span></div>
+                <div class="help-row"><strong>Base Year Stop</strong><span><code>Recovery = max(0, Expense - Stop) × Pro Rata Share</code>.</span></div>
+                <div class="help-row"><strong>Modified Gross (pooled)</strong><span>Stop test uses pooled modified-gross expenses, then allocates by category share.</span></div>
+                <div class="help-row"><strong>Full Service Gross / None</strong><span>Recovery is zero unless category overrides change type.</span></div>
+                <div class="help-example">
+                    Modified Gross example: pooled post-gross-up expenses are <code>$25.18/SF</code>, stop is <code>$11.00/SF</code>, tenant area <code>15,000 SF</code>.<br>
+                    Excess = <code>14.18/SF</code>, tenant pooled annual recovery = <code>14.18 × 15,000 = 212,700</code> (rounded).<br>
+                    If Real Estate Taxes are <code>35.75%</code> of the pool, tax recovery is <code>~76,013</code> annual.
+                </div>
+            </section>
+
+            <section class="help-card">
+                <h3>Gross-Up (Expense Stabilization)</h3>
+                <div class="help-row"><strong>When applied</strong><span>For expenses marked gross-up eligible, only when actual occupancy is below target occupancy.</span></div>
+                <div class="help-row"><strong>Formula</strong><span><code>Grossed Expense = Actual Expense × (Reference Occupancy / Actual Occupancy)</code>.</span></div>
+                <div class="help-row"><strong>Reference occupancy</strong><span>Valuation-level stabilized occupancy if set; otherwise each expense line’s gross-up target.</span></div>
+                <div class="help-example">
+                    Example: CAM is <code>$360,000</code> at <code>80%</code> occupancy, reference is <code>95%</code>.<br>
+                    Grossed CAM = <code>360,000 × (0.95 / 0.80) = 427,500</code>.
+                </div>
+            </section>
+
+            <section class="help-card">
+                <h3>Reversion / Terminal Value</h3>
+                <div class="help-row"><strong>Default NOI basis</strong><span>By default, sale uses <code>Year N+1 NOI</code> (Hold + 1).</span></div>
+                <div class="help-row"><strong>Gross Reversion</strong><span><code>NOI Basis / Exit Cap Rate</code>.</span></div>
+                <div class="help-row"><strong>Net Reversion (Terminal Value)</strong><span><code>Gross Reversion - Exit Costs - Transfer Tax</code>.</span></div>
+                <div class="help-example">
+                    Example: <code>NOI=1,200,000</code>, <code>Exit Cap=6.0%</code> gives gross reversion <code>20,000,000</code>.<br>
+                    If exit costs are <code>2.0%</code> and transfer tax is <code>1.0%</code>, net reversion is <code>19,400,000</code>.
+                </div>
+            </section>
+
+            <section class="help-card">
+                <h3>DCF Metrics</h3>
+                <div class="help-row"><strong>NPV</strong><span>Present value of annual CFBD plus terminal value discounted at the valuation discount rate.</span></div>
+                <div class="help-row"><strong>IRR</strong><span>Discount rate where NPV of the modeled cash flow series equals zero.</span></div>
+                <div class="help-row"><strong>Going-In Cap</strong><span><code>Year 1 NOI / Implied Purchase Price</code>.</span></div>
+                <div class="help-row"><strong>Average Occupancy</strong><span>Average of modeled monthly occupancy over the analysis horizon.</span></div>
+                <div class="help-row"><strong>WALT</strong><span>Area-weighted remaining lease term (active in-place leases at analysis start).</span></div>
+            </section>
+
+            <section class="help-card">
+                <h3>Tenant Recovery Audit Columns</h3>
+                <div class="help-row"><strong>Actual Exp/SF (Pre/Post GU)</strong><span>Category annual expense divided by total property SF, before and after gross-up.</span></div>
+                <div class="help-row"><strong>Pooled Exp/SF</strong><span>Total modified-gross pool per SF for the same month/lease group.</span></div>
+                <div class="help-row"><strong>Excess Over Stop/SF</strong><span><code>max(0, Pooled Exp/SF - Stop/SF)</code>.</span></div>
+                <div class="help-row"><strong>Category Share %</strong><span>Category post-GU annual amount divided by pooled post-GU annual amount.</span></div>
+                <div class="help-row"><strong>Weighted Monthly</strong><span><code>(Annual Recovery / 12) × Proration × Free-Rent Flag × Scenario Weight</code>.</span></div>
+            </section>
+        </div>`;
+}
+
+
 // ─── Tenants View ────────────────────────────────────────────
 
-async function tenantsView() {
+async function tenantsView({ propertyId } = {}) {
     setBreadcrumb([
         { label: 'Dashboard', href: '#/dashboard' },
         { label: 'Tenants' }
     ]);
 
+    let properties;
+    try {
+        properties = await api.get('/properties');
+    } catch (err) {
+        $app().innerHTML = `<div class="empty-state"><h3>Cannot load properties</h3><p>${err.message}</p></div>`;
+        return;
+    }
+
+    if (!properties || properties.length === 0) {
+        $app().innerHTML = `
+            <div class="empty-state">
+                <h3>No properties found</h3>
+                <p>Create a property first. Tenants are scoped to each property.</p>
+                <br><a href="#/dashboard" class="btn btn-secondary">Back to Dashboard</a>
+            </div>`;
+        return;
+    }
+
+    const selectedPropertyId = propertyId || properties[0].id;
+    const selectedProperty = properties.find(p => p.id === selectedPropertyId) || properties[0];
+
     let tenants;
     try {
-        tenants = await api.get('/tenants');
+        tenants = await api.get(`/properties/${selectedProperty.id}/tenants`);
     } catch (err) {
         $app().innerHTML = `<div class="empty-state"><h3>Cannot load tenants</h3><p>${err.message}</p></div>`;
         return;
     }
+
+    const propertyOptions = properties.map(p => (
+        `<option value="${p.id}" ${p.id === selectedProperty.id ? 'selected' : ''}>${p.name}</option>`
+    )).join('');
 
     const rows = tenants.map(t => `
         <tr>
@@ -2620,11 +2994,18 @@ async function tenantsView() {
     $app().innerHTML = `
         <div class="page-header">
             <h1 class="page-title">Tenants</h1>
-            <p class="page-subtitle">${tenants.length} tenant${tenants.length !== 1 ? 's' : ''} in the system</p>
+            <p class="page-subtitle">${tenants.length} tenant${tenants.length !== 1 ? 's' : ''} for ${selectedProperty.name}</p>
         </div>
 
         <div class="section-header">
-            <h2 class="section-title">All Tenants</h2>
+            <h2 class="section-title">Property</h2>
+        </div>
+        <div style="max-width:380px;margin-bottom:16px">
+            <select id="tenantPropertySelect" class="form-input">${propertyOptions}</select>
+        </div>
+
+        <div class="section-header">
+            <h2 class="section-title">Property Tenants</h2>
             <button class="btn btn-primary btn-sm" id="newTenantBtn">${icons.plus} New Tenant</button>
         </div>
 
@@ -2644,16 +3025,23 @@ async function tenantsView() {
             </table>
         </div>`;
 
+    const propertySelect = document.getElementById('tenantPropertySelect');
+    if (propertySelect) {
+        propertySelect.addEventListener('change', () => {
+            location.hash = `#/tenants/${propertySelect.value}`;
+        });
+    }
+
     // New Tenant
     document.getElementById('newTenantBtn').addEventListener('click', () => {
         showFormModal({
             title: 'New Tenant',
             fields: TENANT_FIELDS,
             onSubmit: async (data, overlay) => {
-                await api.post('/tenants', data);
+                await api.post(`/properties/${selectedProperty.id}/tenants`, data);
                 overlay.remove();
                 toast('Tenant created', 'success');
-                tenantsView();
+                tenantsView({ propertyId: selectedProperty.id });
             }
         });
     });
@@ -2668,10 +3056,10 @@ async function tenantsView() {
                 fields: TENANT_FIELDS,
                 initialValues: t,
                 onSubmit: async (data, overlay) => {
-                    await api.put(`/tenants/${tid}`, data);
+                    await api.put(`/properties/${selectedProperty.id}/tenants/${tid}`, data);
                     overlay.remove();
                     toast('Tenant updated', 'success');
-                    tenantsView();
+                    tenantsView({ propertyId: selectedProperty.id });
                 }
             });
         });
@@ -2683,9 +3071,9 @@ async function tenantsView() {
             const tid = btn.dataset.deleteTenant;
             const t = tenants.find(x => x.id === tid);
             showDeleteConfirm(t.name, async () => {
-                await api.del(`/tenants/${tid}`);
+                await api.del(`/properties/${selectedProperty.id}/tenants/${tid}`);
                 toast('Tenant deleted', 'success');
-                tenantsView();
+                tenantsView({ propertyId: selectedProperty.id });
             });
         });
     });
@@ -2725,12 +3113,13 @@ async function valuationView({ id }) {
         api.get(`/valuations/${id}/reports/full`).catch(() => null),
     ]);
 
-    // Get property + market profiles
-    let property, marketProfiles = [];
+    // Get property + market profiles + expenses (for reversion gross-up disclosure)
+    let property, marketProfiles = [], expenses = [];
     try {
-        [property, marketProfiles] = await Promise.all([
+        [property, marketProfiles, expenses] = await Promise.all([
             api.get(`/properties/${valuation.property_id}`),
             api.get(`/properties/${valuation.property_id}/market-profiles`),
+            api.get(`/properties/${valuation.property_id}/expenses`),
         ]);
     } catch { property = null; }
 
@@ -2788,10 +3177,20 @@ async function valuationView({ id }) {
                 }
             };
         }
+        // Open dedicated tenant recovery audit page/tab
+        const auditBtn = document.getElementById('valAuditBtn');
+        if (auditBtn && valuation.property_id) {
+            auditBtn.onclick = () => {
+                sessionStorage.setItem('opendcf_property_tab', 'recovery-audit');
+                sessionStorage.setItem('opendcf_recovery_audit_valuation_id', valuation.id);
+                location.hash = `#/property/${valuation.property_id}`;
+            };
+        }
     }
 
     const actionButtons = `
         <div class="property-header-actions">
+            <button class="btn btn-secondary btn-sm" id="valAuditBtn">Tenant Recovery Audit</button>
             <button class="btn btn-secondary btn-sm" id="valEditBtn">${icons.edit} Edit</button>
             <button class="btn btn-primary btn-sm" id="valRunBtn">${fullReport && fullReport.key_metrics ? 'Re-run' : 'Run Valuation'}</button>
             <button class="btn btn-danger btn-sm" id="valDeleteBtn">${icons.trash} Delete</button>
@@ -2885,7 +3284,7 @@ async function valuationView({ id }) {
         <div class="cf-table-wrap" id="cfTableWrap">
             ${renderCashFlowTable(cf, tenants, marketProfiles, property ? property.area_unit : 'sf')}
         </div>
-        ${renderReversionValueSection(valuation, km, cf)}
+        ${renderReversionValueSection(valuation, km, cf, expenses)}
     `;
 
     // Render charts
@@ -2913,7 +3312,7 @@ async function valuationView({ id }) {
     });
 }
 
-function renderReversionValueSection(valuation, keyMetrics, cashFlows) {
+function renderReversionValueSection(valuation, keyMetrics, cashFlows, expenses = []) {
     if (!valuation || !keyMetrics || !cashFlows || cashFlows.length === 0) return '';
 
     const asNum = (v) => {
@@ -3024,6 +3423,35 @@ function renderReversionValueSection(valuation, keyMetrics, cashFlows) {
     const netReversion = grossReversion - exitCostsAmount - transferTaxAmount;
     const calcVariance = terminalValue - netReversion;
     const transferRate = grossReversion > 0 ? transferTaxAmount / grossReversion : 0;
+    const grossUpEnabled = !!valuation.apply_stabilized_gross_up;
+    const stabilizedOcc = valuation.stabilized_occupancy_pct != null ? asNum(valuation.stabilized_occupancy_pct) : null;
+    const eligibleGrossUp = (expenses || []).filter(e => e.is_gross_up_eligible && !e.is_pct_of_egi);
+    const grossUpCategoryList = [...new Set(eligibleGrossUp.map(e => fmt.typeLabel(e.category)))].join(', ');
+    const grossUpNote = grossUpEnabled
+        ? (stabilizedOcc != null
+            ? `Enabled (global target ${fmt.pct(stabilizedOcc)})`
+            : 'Enabled (using per-expense gross-up targets)')
+        : 'Not applied';
+    const grossUpRows = grossUpEnabled
+        ? `
+                    <tr>
+                        <td>Gross-Up Setting</td>
+                        <td>Apply stabilized gross-up to eligible operating expenses</td>
+                        <td class="mono right">${grossUpNote}</td>
+                    </tr>
+                    <tr>
+                        <td>Gross-Up Scope</td>
+                        <td>Eligible expense categories in this property</td>
+                        <td class="mono right">${eligibleGrossUp.length > 0 ? grossUpCategoryList : 'None marked eligible'}</td>
+                    </tr>
+        `
+        : `
+                    <tr>
+                        <td>Gross-Up Setting</td>
+                        <td>Apply stabilized gross-up to eligible operating expenses</td>
+                        <td class="mono right">Not applied</td>
+                    </tr>
+        `;
 
     return `
         <div class="section-header" style="margin-top:20px">
@@ -3044,6 +3472,7 @@ function renderReversionValueSection(valuation, keyMetrics, cashFlows) {
                         <td>NOI basis for sale</td>
                         <td class="mono right">${fmt.currencyExact(noiBasis)}</td>
                     </tr>
+                    ${grossUpRows}
                     <tr>
                         <td>Gross Reversion</td>
                         <td>${fmt.currencyExact(noiBasis)} / ${fmt.pct(exitCapRate)}</td>
@@ -3411,6 +3840,8 @@ function renderExpirationChart(expirations) {
 addRoute('/dashboard', dashboardView);
 addRoute('/property/:id', propertyView);
 addRoute('/tenants', tenantsView);
+addRoute('/tenants/:propertyId', tenantsView);
+addRoute('/help', helpView);
 addRoute('/valuation/:id', valuationView);
 
 window.addEventListener('hashchange', navigate);

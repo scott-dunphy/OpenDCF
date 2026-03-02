@@ -18,14 +18,16 @@ async def _create_property(client: AsyncClient) -> str:
 
 class TestTenantCRUD:
     async def test_create_tenant(self, client: AsyncClient):
-        resp = await client.post("/api/v1/tenants", json={"name": "Acme Corp"})
+        prop_id = await _create_property(client)
+        resp = await client.post(f"/api/v1/properties/{prop_id}/tenants", json={"name": "Acme Corp"})
         assert resp.status_code == 201
         data = resp.json()
         assert data["name"] == "Acme Corp"
         assert "id" in data
 
     async def test_create_tenant_with_details(self, client: AsyncClient):
-        resp = await client.post("/api/v1/tenants", json={
+        prop_id = await _create_property(client)
+        resp = await client.post(f"/api/v1/properties/{prop_id}/tenants", json={
             "name": "Tech Co",
             "credit_rating": "A",
             "industry": "Technology",
@@ -34,36 +36,53 @@ class TestTenantCRUD:
         assert resp.json()["credit_rating"] == "A"
 
     async def test_list_tenants(self, client: AsyncClient):
-        await client.post("/api/v1/tenants", json={"name": "Tenant A"})
-        await client.post("/api/v1/tenants", json={"name": "Tenant B"})
-        resp = await client.get("/api/v1/tenants")
+        prop_id = await _create_property(client)
+        await client.post(f"/api/v1/properties/{prop_id}/tenants", json={"name": "Tenant A"})
+        await client.post(f"/api/v1/properties/{prop_id}/tenants", json={"name": "Tenant B"})
+        resp = await client.get(f"/api/v1/properties/{prop_id}/tenants")
         assert resp.status_code == 200
         assert len(resp.json()) >= 2
 
+    async def test_tenants_are_scoped_to_property(self, client: AsyncClient):
+        prop_a = await _create_property(client)
+        prop_b = await _create_property(client)
+        await client.post(f"/api/v1/properties/{prop_a}/tenants", json={"name": "Tenant A"})
+        await client.post(f"/api/v1/properties/{prop_b}/tenants", json={"name": "Tenant B"})
+
+        resp_a = await client.get(f"/api/v1/properties/{prop_a}/tenants")
+        assert resp_a.status_code == 200
+        names_a = {t["name"] for t in resp_a.json()}
+        assert "Tenant A" in names_a
+        assert "Tenant B" not in names_a
+
     async def test_get_tenant(self, client: AsyncClient):
-        create_resp = await client.post("/api/v1/tenants", json={"name": "BigCorp"})
+        prop_id = await _create_property(client)
+        create_resp = await client.post(f"/api/v1/properties/{prop_id}/tenants", json={"name": "BigCorp"})
         tenant_id = create_resp.json()["id"]
-        resp = await client.get(f"/api/v1/tenants/{tenant_id}")
+        resp = await client.get(f"/api/v1/properties/{prop_id}/tenants/{tenant_id}")
         assert resp.status_code == 200
         assert resp.json()["name"] == "BigCorp"
 
     async def test_get_tenant_not_found(self, client: AsyncClient):
-        resp = await client.get("/api/v1/tenants/nonexistent")
+        prop_id = await _create_property(client)
+        resp = await client.get(f"/api/v1/properties/{prop_id}/tenants/nonexistent")
         assert resp.status_code == 404
 
     async def test_update_tenant(self, client: AsyncClient):
-        create_resp = await client.post("/api/v1/tenants", json={"name": "Old Name"})
+        prop_id = await _create_property(client)
+        create_resp = await client.post(f"/api/v1/properties/{prop_id}/tenants", json={"name": "Old Name"})
         tenant_id = create_resp.json()["id"]
-        resp = await client.put(f"/api/v1/tenants/{tenant_id}", json={"name": "New Name"})
+        resp = await client.put(f"/api/v1/properties/{prop_id}/tenants/{tenant_id}", json={"name": "New Name"})
         assert resp.status_code == 200
         assert resp.json()["name"] == "New Name"
 
     async def test_delete_tenant(self, client: AsyncClient):
-        create_resp = await client.post("/api/v1/tenants", json={"name": "To Delete"})
+        prop_id = await _create_property(client)
+        create_resp = await client.post(f"/api/v1/properties/{prop_id}/tenants", json={"name": "To Delete"})
         tenant_id = create_resp.json()["id"]
-        del_resp = await client.delete(f"/api/v1/tenants/{tenant_id}")
+        del_resp = await client.delete(f"/api/v1/properties/{prop_id}/tenants/{tenant_id}")
         assert del_resp.status_code == 204
-        get_resp = await client.get(f"/api/v1/tenants/{tenant_id}")
+        get_resp = await client.get(f"/api/v1/properties/{prop_id}/tenants/{tenant_id}")
         assert get_resp.status_code == 404
 
 

@@ -10,6 +10,7 @@ from src.engine.types import (
     ExpenseInput,
     MarketAssumptions,
     MonthlySlice,
+    OtherIncomeInput,
     SuiteInput,
     ValuationParams,
 )
@@ -597,6 +598,58 @@ class TestMultiYear:
         assert abs(annual_cfs[0].operating_expenses + Decimal("100000")) < Decimal("1")
         # Year 2 opex = $103K
         assert abs(annual_cfs[1].operating_expenses + Decimal("103000")) < Decimal("1")
+
+
+class TestStubYearProration:
+    def test_stub_fiscal_year_prorates_annual_assumptions(self):
+        """
+        Stub fiscal years should prorate annual assumptions (OpEx, other income,
+        and capital reserves) by fiscal-year coverage.
+        """
+        suite = make_suite("s1", area=10_000)
+        analysis = build_analysis_period(date(2025, 1, 1), 24, 6)  # FY: 6m, 12m, 6m
+        slices = [make_slice("s1", i, 0) for i in range(24)]
+
+        fixed_opex = make_expense(
+            category="taxes",
+            base_amount=120_000,
+            growth_rate=0.0,
+            is_recoverable=False,
+        )
+        oi_item = OtherIncomeInput(
+            income_id="oi_1",
+            category="parking",
+            base_amount=Decimal("24000"),
+            growth_rate=Decimal("0"),
+        )
+
+        annual_cfs, _ = build_annual_waterfall(
+            suite_slices={"s1": slices},
+            suites=[suite],
+            expenses=[fixed_opex],
+            params=make_params(cap_reserves=1.0, total_area=10_000),
+            analysis=analysis,
+            market_map={"office": make_market(gen_vac=0.0, credit_loss=0.0)},
+            debt_schedule=[Decimal(0)] * 3,
+            other_income_items=[oi_item],
+            other_income_annual=Decimal("12000"),
+        )
+
+        assert len(annual_cfs) == 3
+
+        # 120,000 annual OpEx and 10,000 annual reserves prorate to 6m,12m,6m.
+        assert abs(annual_cfs[0].operating_expenses + Decimal("60000")) < Decimal("1")
+        assert abs(annual_cfs[1].operating_expenses + Decimal("120000")) < Decimal("1")
+        assert abs(annual_cfs[2].operating_expenses + Decimal("60000")) < Decimal("1")
+
+        assert abs(annual_cfs[0].capital_reserves + Decimal("5000")) < Decimal("1")
+        assert abs(annual_cfs[1].capital_reserves + Decimal("10000")) < Decimal("1")
+        assert abs(annual_cfs[2].capital_reserves + Decimal("5000")) < Decimal("1")
+
+        # Other income: legacy 12k + item 24k = 36k annual; same stub-year proration.
+        assert abs(annual_cfs[0].other_income - Decimal("18000")) < Decimal("1")
+        assert abs(annual_cfs[1].other_income - Decimal("36000")) < Decimal("1")
+        assert abs(annual_cfs[2].other_income - Decimal("18000")) < Decimal("1")
 
 
 class TestSuiteAnnualBaseVsEffective:

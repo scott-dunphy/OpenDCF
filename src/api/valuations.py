@@ -11,6 +11,7 @@ from src.schemas.cashflow import (
     LeaseExpirationEntry,
     RentRollEntry,
     TenantCashFlowDetail,
+    TenantRecoveryAuditEntry,
     ValuationRunResponse,
 )
 from src.schemas.valuation import ValuationCreate, ValuationRead, ValuationUpdate
@@ -176,6 +177,18 @@ async def report_tenant_detail(
     if response is None:
         raise HTTPException(status_code=404, detail="Valuation not found")
     return response.tenant_cash_flows
+
+
+@router.get("/valuations/{valuation_id}/reports/recovery-audit", response_model=list[TenantRecoveryAuditEntry])
+async def report_recovery_audit(
+    valuation_id: str,
+    db: AsyncSession = Depends(get_session),
+) -> list[TenantRecoveryAuditEntry]:
+    service = ValuationService(db)
+    response = await service.get_results(valuation_id)
+    if response is None:
+        raise HTTPException(status_code=404, detail="Valuation not found")
+    return response.recovery_audit
 
 
 @router.get("/valuations/{valuation_id}/reports/full", response_model=ValuationRunResponse)

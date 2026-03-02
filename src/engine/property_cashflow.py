@@ -351,6 +351,7 @@ def run_valuation(
     # Step 1: Project all suites, collecting speculative lease inputs
     suite_slices: dict[str, list[MonthlySlice]] = {}
     all_speculative_leases: list[LeaseInput] = []
+    recovery_audit = []
 
     use_occupancy = property_type in ("multifamily", "self_storage")
 
@@ -398,6 +399,7 @@ def run_valuation(
                 occupancy_by_month,
                 apply_stabilized_gross_up=params.apply_stabilized_gross_up,
                 stabilized_occupancy_pct=params.stabilized_occupancy_pct,
+                recovery_audit=recovery_audit,
             )
 
     # Step 4: Build debt schedule
@@ -481,4 +483,5 @@ def run_valuation(
         terminal_exit_costs_amount=terminal.exit_costs_amount,
         terminal_transfer_tax_amount=terminal.transfer_tax_amount,
         terminal_transfer_tax_preset=params.transfer_tax_preset,
+        recovery_audit=recovery_audit,
     )

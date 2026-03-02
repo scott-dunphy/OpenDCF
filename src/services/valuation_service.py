@@ -45,6 +45,7 @@ from src.schemas.cashflow import (
     LeaseExpirationEntry,
     RentRollEntry,
     TenantCashFlowDetail,
+    TenantRecoveryAuditEntry,
     ValuationRunResponse,
 )
 from src.schemas.common import ValuationStatus
@@ -109,6 +110,7 @@ class ValuationService:
 
             # Build tenant CFs before persist (needed for JSON serialization)
             tenant_cfs = self._build_tenant_cash_flows(result, leases)
+            recovery_audit = self._build_recovery_audit(result, suites)
 
             # Persist results
             valuation.status = ValuationStatus.COMPLETED.value
@@ -128,6 +130,9 @@ class ValuationService:
             )
             valuation.result_tenant_cash_flows_json = json.dumps(
                 [t.model_dump(mode='json') for t in tenant_cfs]
+            )
+            valuation.result_recovery_audit_json = json.dumps(
+                [r.model_dump(mode='json') for r in recovery_audit]
             )
             await self.db.commit()
 
@@ -168,6 +173,11 @@ class ValuationService:
             raw = json.loads(valuation.result_tenant_cash_flows_json)
             for item in raw:
                 tenant_cfs.append(TenantCashFlowDetail(**item))
+        recovery_audit = []
+        if valuation.result_recovery_audit_json:
+            raw = json.loads(valuation.result_recovery_audit_json)
+            for item in raw:
+                recovery_audit.append(TenantRecoveryAuditEntry(**item))
 
         return ValuationRunResponse(
             valuation_id=valuation_id,
@@ -175,6 +185,7 @@ class ValuationService:
             key_metrics=self._build_key_metrics_from_valuation(valuation, annual_cfs),
             annual_cash_flows=annual_cfs,
             tenant_cash_flows=tenant_cfs,
+            recovery_audit=recovery_audit,
             rent_roll=self._build_rent_roll(suites, leases, property_),
             lease_expiration_schedule=self._build_expiration_schedule(suites, leases, property_),
         )
@@ -511,6 +522,7 @@ class ValuationService:
             key_metrics=key_metrics,
             annual_cash_flows=annual_cfs,
             tenant_cash_flows=tenant_cfs,
+            recovery_audit=self._build_recovery_audit(result, suites),
             lease_expiration_schedule=expiration_schedule,
             rent_roll=rent_roll,
         )
@@ -611,6 +623,43 @@ class ValuationService:
                 annual_ti_lc=[d.ti_lc_cost for d in details_sorted],
             ))
         return result_list
+
+    def _build_recovery_audit(self, result, suites: list[Suite]) -> list[TenantRecoveryAuditEntry]:
+        suite_name_map = {s.id: s.suite_name for s in suites}
+        rows: list[TenantRecoveryAuditEntry] = []
+        for row in result.recovery_audit:
+            rows.append(
+                TenantRecoveryAuditEntry(
+                    year=row.year,
+                    period_start=row.period_start,
+                    period_end=row.period_end,
+                    suite_id=row.suite_id,
+                    suite_name=suite_name_map.get(row.suite_id, row.suite_id),
+                    lease_id=row.lease_id,
+                    tenant_name=row.tenant_name,
+                    expense_category=row.expense_category,
+                    recovery_type=row.recovery_type,
+                    annual_expense_before_gross_up=row.annual_expense_before_gross_up,
+                    annual_expense_after_gross_up=row.annual_expense_after_gross_up,
+                    actual_occupancy_pct=row.actual_occupancy_pct,
+                    gross_up_reference_occupancy_pct=row.gross_up_reference_occupancy_pct,
+                    gross_up_factor=row.gross_up_factor,
+                    pro_rata_share_pct=row.pro_rata_share_pct,
+                    base_year_stop_amount=row.base_year_stop_amount,
+                    expense_stop_per_sf=row.expense_stop_per_sf,
+                    cap_per_sf_annual=row.cap_per_sf_annual,
+                    floor_per_sf_annual=row.floor_per_sf_annual,
+                    admin_fee_pct=row.admin_fee_pct,
+                    annual_recovery_before_proration=row.annual_recovery_before_proration,
+                    monthly_recovery_before_free_rent=row.monthly_recovery_before_free_rent,
+                    proration_factor=row.proration_factor,
+                    is_recovery_free_rent_abatement=row.is_recovery_free_rent_abatement,
+                    monthly_recovery_after_free_rent=row.monthly_recovery_after_free_rent,
+                    scenario_weight=row.scenario_weight,
+                    weighted_monthly_recovery=row.weighted_monthly_recovery,
+                )
+            )
+        return rows
 
     def _build_rent_roll(
         self, suites: list[Suite], leases: list[Lease], property_: Property

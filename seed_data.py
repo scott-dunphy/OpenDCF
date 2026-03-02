@@ -4,7 +4,7 @@ Seed example data for OpenDCF — Commercial Real Estate Valuation Engine.
 Usage:
     python seed_data.py
 
-Creates 5 example properties with realistic tenants, leases, expenses,
+Creates 6 example properties with realistic tenants, leases, expenses,
 market profiles, and valuations. Runs valuations via the engine.
 """
 
@@ -591,6 +591,94 @@ async def seed():
 
         print("  Created: Harbor Point Business Center (Office, Boston)")
 
+        # ──────────────────────────────────────────────
+        # PROPERTY 6: Stabilized Gross-Up Demo (Office, Atlanta)
+        # ──────────────────────────────────────────────
+        p6_id = uid()
+        p6 = Property(
+            id=p6_id, name="Peachtree Plaza Office",
+            address_line1="1200 Peachtree Street NE", city="Atlanta", state="GA", zip_code="30309",
+            property_type="office", total_area=Decimal("60000"), area_unit="sf",
+            year_built=2006, analysis_start_date=date(2025, 1, 1),
+            analysis_period_months=120, fiscal_year_end_month=12,
+        )
+        session.add(p6)
+
+        p6_suites = [
+            ("Suite 100", 1, Decimal("15000"), "office"),
+            ("Suite 200", 2, Decimal("15000"), "office"),
+            ("Suite 300", 3, Decimal("15000"), "office"),
+            ("Suite 400", 4, Decimal("15000"), "office"),
+        ]
+        p6_suite_ids = {}
+        for name, floor, area, stype in p6_suites:
+            sid = uid()
+            p6_suite_ids[name] = sid
+            session.add(Suite(
+                id=sid, property_id=p6_id, suite_name=name, floor=floor, area=area,
+                space_type=stype, is_available=True
+            ))
+
+        # 2 leased suites + 2 vacant suites to demonstrate occupancy-driven gross-up.
+        session.add(Lease(
+            id=uid(), suite_id=p6_suite_ids["Suite 100"], tenant_id=tenants["goldman"].id,
+            lease_type="in_place", lease_start_date=date(2023, 1, 1), lease_end_date=date(2030, 12, 31),
+            base_rent_per_unit=Decimal("36"), rent_payment_frequency="annual",
+            escalation_type="pct_annual", escalation_pct_annual=Decimal("0.025"),
+            recovery_type="nnn",
+        ))
+        session.add(Lease(
+            id=uid(), suite_id=p6_suite_ids["Suite 200"], tenant_id=tenants["deloitte"].id,
+            lease_type="in_place", lease_start_date=date(2024, 4, 1), lease_end_date=date(2029, 3, 31),
+            base_rent_per_unit=Decimal("34"), rent_payment_frequency="annual",
+            escalation_type="flat",
+            recovery_type="modified_gross", expense_stop_per_sf=Decimal("11"),
+        ))
+        # Suite 300 + Suite 400 intentionally vacant
+
+        p6_expenses = [
+            ("real_estate_taxes", "Property Taxes", Decimal("540000"), Decimal("0.03"), True, False, None),
+            ("insurance", "Insurance", Decimal("108000"), Decimal("0.025"), True, False, None),
+            # Variable expenses flagged for gross-up
+            ("cam", "Common Area Maintenance", Decimal("360000"), Decimal("0.03"), True, True, Decimal("0.95")),
+            ("utilities", "Utilities", Decimal("240000"), Decimal("0.03"), True, True, Decimal("0.95")),
+            ("repairs_maintenance", "Repairs & Maintenance", Decimal("150000"), Decimal("0.025"), True, False, None),
+        ]
+        for cat, desc, amt, gr, rec, gross_up, gross_up_target in p6_expenses:
+            session.add(PropertyExpense(
+                id=uid(), property_id=p6_id, category=cat, description=desc,
+                base_year_amount=amt, growth_rate_pct=gr, is_recoverable=rec,
+                is_gross_up_eligible=gross_up, gross_up_vacancy_pct=gross_up_target,
+            ))
+        session.add(PropertyExpense(
+            id=uid(), property_id=p6_id, category="management_fee", description="Management",
+            base_year_amount=Decimal("0"), growth_rate_pct=Decimal("0"),
+            is_recoverable=False, is_pct_of_egi=True, pct_of_egi=Decimal("0.04"),
+        ))
+
+        session.add(MarketLeasingProfile(
+            id=uid(), property_id=p6_id, space_type="office",
+            description="Atlanta Class A- Office",
+            market_rent_per_unit=Decimal("35"), rent_growth_rate_pct=Decimal("0.025"),
+            new_lease_term_months=60, new_tenant_ti_per_sf=Decimal("32"),
+            new_tenant_lc_pct=Decimal("0.055"), new_tenant_free_rent_months=2, downtime_months=5,
+            renewal_probability=Decimal("0.60"), renewal_lease_term_months=60,
+            renewal_ti_per_sf=Decimal("16"), renewal_lc_pct=Decimal("0.03"),
+            renewal_rent_adjustment_pct=Decimal("0"),
+            general_vacancy_pct=Decimal("0.10"), credit_loss_pct=Decimal("0.015"),
+        ))
+
+        v6_id = uid()
+        session.add(Valuation(
+            id=v6_id, property_id=p6_id, name="Gross-Up Demonstration Case",
+            description="Office underwriting example with valuation-level stabilized gross-up enabled",
+            discount_rate=Decimal("0.0825"), exit_cap_rate=Decimal("0.0675"),
+            exit_costs_pct=Decimal("0.02"), capital_reserves_per_unit=Decimal("0.25"),
+            apply_stabilized_gross_up=True, stabilized_occupancy_pct=Decimal("0.95"),
+        ))
+
+        print("  Created: Peachtree Plaza Office (Office, Atlanta, Gross-Up Demo)")
+
         # Commit all data
         await session.commit()
         print("\nAll data committed. Running valuations...")
@@ -598,7 +686,7 @@ async def seed():
         # ──────────────────────────────────────────────
         # RUN VALUATIONS
         # ──────────────────────────────────────────────
-        valuation_ids = [v1_id, v2_id, v3_id, v4_id, v5_id]
+        valuation_ids = [v1_id, v2_id, v3_id, v4_id, v5_id, v6_id]
         for vid in valuation_ids:
             try:
                 service = ValuationService(session)

@@ -66,6 +66,37 @@ class TenantCashFlowDetail(BaseModel):
     annual_ti_lc: list[Decimal]          # combined TI+LC costs (negative)
 
 
+class TenantRecoveryAuditEntry(BaseModel):
+    """Monthly per-expense recovery audit row for a tenant/suite lease slice."""
+    year: int
+    period_start: date
+    period_end: date
+    suite_id: str
+    suite_name: str
+    lease_id: str
+    tenant_name: str | None
+    expense_category: str
+    recovery_type: str
+    annual_expense_before_gross_up: Decimal
+    annual_expense_after_gross_up: Decimal
+    actual_occupancy_pct: Decimal
+    gross_up_reference_occupancy_pct: Decimal | None
+    gross_up_factor: Decimal
+    pro_rata_share_pct: Decimal
+    base_year_stop_amount: Decimal | None
+    expense_stop_per_sf: Decimal | None
+    cap_per_sf_annual: Decimal | None
+    floor_per_sf_annual: Decimal | None
+    admin_fee_pct: Decimal | None
+    annual_recovery_before_proration: Decimal
+    monthly_recovery_before_free_rent: Decimal
+    proration_factor: Decimal
+    is_recovery_free_rent_abatement: bool
+    monthly_recovery_after_free_rent: Decimal
+    scenario_weight: Decimal
+    weighted_monthly_recovery: Decimal
+
+
 class LeaseExpirationEntry(BaseModel):
     """Lease expirations by year."""
     year: int
@@ -125,5 +156,6 @@ class ValuationRunResponse(BaseModel):
     key_metrics: KeyMetricsSummary | None = None
     annual_cash_flows: list[AnnualCashFlowSummary] = []
     tenant_cash_flows: list[TenantCashFlowDetail] = []
+    recovery_audit: list[TenantRecoveryAuditEntry] = []
     lease_expiration_schedule: list[LeaseExpirationEntry] = []
     rent_roll: list[RentRollEntry] = []

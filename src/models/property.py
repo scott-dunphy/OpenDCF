@@ -47,6 +47,9 @@ class Property(Base, UUIDPrimaryKey, TimestampMixin):
     other_income_items: Mapped[list["PropertyOtherIncome"]] = relationship(  # type: ignore[name-defined]
         back_populates="property", cascade="all, delete-orphan"
     )
+    tenants: Mapped[list["Tenant"]] = relationship(  # type: ignore[name-defined]
+        back_populates="property", cascade="all, delete-orphan"
+    )
 
 
 class Suite(Base, UUIDPrimaryKey, TimestampMixin):

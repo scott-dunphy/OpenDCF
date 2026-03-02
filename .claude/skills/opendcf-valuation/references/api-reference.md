@@ -111,8 +111,8 @@ Delete suite (leases cascade).
 
 ## Tenants
 
-### POST /api/v1/tenants
-Create tenant.
+### POST /api/v1/properties/{property_id}/tenants
+Create tenant for a property.
 
 | Field | Type | Required | Default |
 |---|---|---|---|
@@ -124,16 +124,16 @@ Create tenant.
 | notes | string | no | null |
 | comment | string | no | null |
 
-### GET /api/v1/tenants
-List tenants (`skip`, `limit` query params supported).
+### GET /api/v1/properties/{property_id}/tenants
+List tenants for a property (`skip`, `limit` query params supported).
 
-### GET /api/v1/tenants/{tenant_id}
+### GET /api/v1/properties/{property_id}/tenants/{tenant_id}
 Get tenant by ID.
 
-### PUT /api/v1/tenants/{tenant_id}
+### PUT /api/v1/properties/{property_id}/tenants/{tenant_id}
 Update tenant (all fields optional, including `comment`).
 
-### DELETE /api/v1/tenants/{tenant_id}
+### DELETE /api/v1/properties/{property_id}/tenants/{tenant_id}
 Delete tenant.
 
 ---

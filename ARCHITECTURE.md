@@ -94,7 +94,7 @@ OpenDCF/
 │   ├── api/                         # FastAPI routers
 │   │   ├── properties.py            # CRUD /api/v1/properties
 │   │   ├── suites.py                # CRUD /api/v1/properties/{id}/suites
-│   │   ├── tenants.py               # CRUD /api/v1/tenants
+│   │   ├── tenants.py               # CRUD /api/v1/properties/{id}/tenants
 │   │   ├── leases.py                # CRUD + sub-resources (rent-steps, free-rent, recovery-overrides)
 │   │   ├── market_assumptions.py    # CRUD /api/v1/properties/{id}/market-profiles
 │   │   ├── expenses.py              # CRUD /api/v1/properties/{id}/expenses
@@ -386,11 +386,11 @@ DELETE /api/v1/properties/{id}/suites/{sid}            Delete suite
 
 ### Tenants & Leases
 ```
-POST   /api/v1/tenants                                 Create tenant
-GET    /api/v1/tenants                                 List tenants
-GET    /api/v1/tenants/{id}                            Get tenant
-PUT    /api/v1/tenants/{id}                            Update tenant
-DELETE /api/v1/tenants/{id}                            Delete tenant
+POST   /api/v1/properties/{id}/tenants                 Create tenant
+GET    /api/v1/properties/{id}/tenants                 List tenants
+GET    /api/v1/properties/{id}/tenants/{tid}           Get tenant
+PUT    /api/v1/properties/{id}/tenants/{tid}           Update tenant
+DELETE /api/v1/properties/{id}/tenants/{tid}           Delete tenant
 POST   /api/v1/suites/{sid}/leases                     Create lease
 GET    /api/v1/suites/{sid}/leases                     List leases for suite
 GET    /api/v1/leases/{id}                             Get lease (with sub-resources)

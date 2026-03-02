@@ -33,7 +33,7 @@ async def _setup_office_property(client: AsyncClient) -> dict:
         suite_ids.append(s.json()["id"])
 
     # 3. Tenant
-    tenant = await client.post("/api/v1/tenants", json={"name": "Acme Corp"})
+    tenant = await client.post(f"/api/v1/properties/{prop_id}/tenants", json={"name": "Acme Corp"})
     tenant_id = tenant.json()["id"]
 
     # 4. Leases (Suite 100 and Suite 200 have in-place leases)
