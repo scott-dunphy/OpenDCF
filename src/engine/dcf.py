@@ -173,7 +173,7 @@ def discount_cash_flows(
         t = Decimal(str(year)) - (Decimal("0.5") if use_mid_year else Decimal(0))
         pv_cfs += cf.cash_flow_before_debt / (Decimal(1) + discount_rate) ** t
 
-    n = Decimal(str(len(annual_cfs)))
+    n = Decimal(str(len(annual_cfs))) - (Decimal("0.5") if use_mid_year else Decimal(0))
     pv_terminal = terminal_value / (Decimal(1) + discount_rate) ** n
     npv = pv_cfs + pv_terminal
     return pv_cfs, pv_terminal, npv

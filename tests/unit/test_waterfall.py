@@ -600,14 +600,14 @@ class TestMultiYear:
         assert abs(annual_cfs[1].operating_expenses + Decimal("103000")) < Decimal("1")
 
 
-class TestStubYearProration:
-    def test_stub_fiscal_year_prorates_annual_assumptions(self):
+class TestAnalysisYearAnnualization:
+    def test_start_anchored_years_use_full_annual_assumptions(self):
         """
-        Stub fiscal years should prorate annual assumptions (OpEx, other income,
-        and capital reserves) by fiscal-year coverage.
+        Annual assumptions (OpEx, other income, and capital reserves) should
+        annualize over start-date-anchored 12-month buckets.
         """
         suite = make_suite("s1", area=10_000)
-        analysis = build_analysis_period(date(2025, 1, 1), 24, 6)  # FY: 6m, 12m, 6m
+        analysis = build_analysis_period(date(2025, 1, 1), 24, 6)  # 2 full analysis years
         slices = [make_slice("s1", i, 0) for i in range(24)]
 
         fixed_opex = make_expense(
@@ -630,26 +630,23 @@ class TestStubYearProration:
             params=make_params(cap_reserves=1.0, total_area=10_000),
             analysis=analysis,
             market_map={"office": make_market(gen_vac=0.0, credit_loss=0.0)},
-            debt_schedule=[Decimal(0)] * 3,
+            debt_schedule=[Decimal(0)] * 2,
             other_income_items=[oi_item],
             other_income_annual=Decimal("12000"),
         )
 
-        assert len(annual_cfs) == 3
+        assert len(annual_cfs) == 2
 
-        # 120,000 annual OpEx and 10,000 annual reserves prorate to 6m,12m,6m.
-        assert abs(annual_cfs[0].operating_expenses + Decimal("60000")) < Decimal("1")
+        # 120,000 annual OpEx and 10,000 annual reserves for each full year.
+        assert abs(annual_cfs[0].operating_expenses + Decimal("120000")) < Decimal("1")
         assert abs(annual_cfs[1].operating_expenses + Decimal("120000")) < Decimal("1")
-        assert abs(annual_cfs[2].operating_expenses + Decimal("60000")) < Decimal("1")
 
-        assert abs(annual_cfs[0].capital_reserves + Decimal("5000")) < Decimal("1")
+        assert abs(annual_cfs[0].capital_reserves + Decimal("10000")) < Decimal("1")
         assert abs(annual_cfs[1].capital_reserves + Decimal("10000")) < Decimal("1")
-        assert abs(annual_cfs[2].capital_reserves + Decimal("5000")) < Decimal("1")
 
-        # Other income: legacy 12k + item 24k = 36k annual; same stub-year proration.
-        assert abs(annual_cfs[0].other_income - Decimal("18000")) < Decimal("1")
+        # Other income: legacy 12k + item 24k = 36k annual each year.
+        assert abs(annual_cfs[0].other_income - Decimal("36000")) < Decimal("1")
         assert abs(annual_cfs[1].other_income - Decimal("36000")) < Decimal("1")
-        assert abs(annual_cfs[2].other_income - Decimal("18000")) < Decimal("1")
 
 
 class TestSuiteAnnualBaseVsEffective:

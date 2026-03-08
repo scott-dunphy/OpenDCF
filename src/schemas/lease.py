@@ -207,6 +207,50 @@ class LeaseUpdate(BaseModel):
     recovery_structure_id: str | None = None
 
 
+class LeaseBulkUpdateItem(BaseModel):
+    lease_id: str
+    fields: LeaseUpdate
+
+
+class LeaseBulkUpdateRequest(BaseModel):
+    updates: list[LeaseBulkUpdateItem] = Field(min_length=1)
+    atomic: bool = False
+
+
+class LeaseBulkUpdateFailure(BaseModel):
+    lease_id: str
+    status_code: int
+    detail: str
+
+
+class LeaseBulkUpdateResponse(BaseModel):
+    updated_count: int
+    failed: list[LeaseBulkUpdateFailure] = Field(default_factory=list)
+
+
+class LeaseExpenseRecoveryBulkUpsertItem(BaseModel):
+    lease_id: str
+    override_id: str | None = None
+    fields: LeaseExpenseRecoveryCreate
+
+
+class LeaseExpenseRecoveryBulkUpsertRequest(BaseModel):
+    updates: list[LeaseExpenseRecoveryBulkUpsertItem] = Field(min_length=1)
+    atomic: bool = False
+
+
+class LeaseExpenseRecoveryBulkUpsertFailure(BaseModel):
+    lease_id: str
+    override_id: str | None = None
+    status_code: int
+    detail: str
+
+
+class LeaseExpenseRecoveryBulkUpsertResponse(BaseModel):
+    upserted_count: int
+    failed: list[LeaseExpenseRecoveryBulkUpsertFailure] = Field(default_factory=list)
+
+
 class LeaseRead(LeaseBase):
     model_config = ConfigDict(from_attributes=True)
     id: str

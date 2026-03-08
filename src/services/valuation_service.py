@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import calendar
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.engine.date_utils import add_months
 from src.engine.property_cashflow import run_valuation
 from src.engine.types import (
     AnalysisPeriod,
@@ -119,6 +120,8 @@ class ValuationService:
             valuation.result_irr = result.irr
             valuation.result_going_in_cap_rate = result.going_in_cap_rate
             valuation.result_exit_value = result.terminal_value
+            valuation.result_pv_cash_flows = result.pv_cash_flows
+            valuation.result_pv_terminal_value = result.pv_terminal
             valuation.result_equity_multiple = result.equity_multiple
             valuation.result_avg_occupancy_pct = result.avg_occupancy_pct
             valuation.result_terminal_noi_basis = result.terminal_noi_basis
@@ -412,6 +415,13 @@ class ValuationService:
             renewal_rent_adjustment_pct=m.renewal_rent_adjustment_pct,
             general_vacancy_pct=m.general_vacancy_pct,
             credit_loss_pct=m.credit_loss_pct,
+            concession_timing_mode=m.concession_timing_mode or "blended",
+            concession_year1_months=m.concession_year1_months,
+            concession_year2_months=m.concession_year2_months,
+            concession_year3_months=m.concession_year3_months,
+            concession_year4_months=m.concession_year4_months,
+            concession_year5_months=m.concession_year5_months,
+            concession_stabilized_months=m.concession_stabilized_months,
         )
 
     def _to_expense_input(self, e: PropertyExpense) -> ExpenseInput:
@@ -587,15 +597,16 @@ class ValuationService:
     ) -> KeyMetricsSummary | None:
         if valuation.result_npv is None:
             return None
+        terminal_value = valuation.result_exit_value or Decimal(0)
         y1 = annual_cfs[0] if annual_cfs else None
         return KeyMetricsSummary(
             npv=valuation.result_npv or Decimal(0),
             irr=valuation.result_irr,
             going_in_cap_rate=valuation.result_going_in_cap_rate or Decimal(0),
             exit_cap_rate=valuation.exit_cap_rate,
-            terminal_value=valuation.result_exit_value or Decimal(0),
-            pv_of_cash_flows=Decimal(0),
-            pv_of_terminal_value=Decimal(0),
+            terminal_value=terminal_value,
+            pv_of_cash_flows=valuation.result_pv_cash_flows or Decimal(0),
+            pv_of_terminal_value=valuation.result_pv_terminal_value or Decimal(0),
             equity_multiple=valuation.result_equity_multiple,
             avg_occupancy_pct=valuation.result_avg_occupancy_pct or Decimal(0),
             weighted_avg_lease_term_years=walt,
@@ -765,16 +776,19 @@ class ValuationService:
         analysis_start: date,
     ) -> list[LeaseExpirationEntry]:
         from collections import defaultdict
-        analysis_end_year = analysis_start.year + (property_.analysis_period_months // 12) + 1
+        analysis_end = add_months(analysis_start, property_.analysis_period_months) - timedelta(days=1)
 
         by_year: dict[int, list[Lease]] = defaultdict(list)
         suite_area: dict[str, Decimal] = {s.id: s.area for s in suites}
         total_area = sum(suite_area.values())
 
         for lease in leases:
-            exp_year = lease.lease_end_date.year
-            if analysis_start.year <= exp_year <= analysis_end_year:
-                by_year[exp_year].append(lease)
+            if analysis_start <= lease.lease_end_date <= analysis_end:
+                analysis_year = self._analysis_year_number(
+                    analysis_start,
+                    lease.lease_end_date,
+                )
+                by_year[analysis_year].append(lease)
 
         result = []
         for year in sorted(by_year.keys()):
@@ -790,6 +804,15 @@ class ValuationService:
                 weighted_avg_rent_per_sf=avg_rent,
             ))
         return result
+
+    def _analysis_year_number(self, analysis_start: date, d: date) -> int:
+        """Map a date into analysis-year buckets anchored to analysis_start."""
+        year = 1
+        start = analysis_start
+        while d > (add_months(start, 12) - timedelta(days=1)):
+            year += 1
+            start = add_months(start, 12)
+        return year
 
     def _effective_analysis_start_date(self, valuation: Valuation, property_: Property) -> date:
         return valuation.analysis_start_date_override or property_.analysis_start_date

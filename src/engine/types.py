@@ -125,6 +125,13 @@ class MarketAssumptions:
     general_vacancy_pct: Decimal
     credit_loss_pct: Decimal
     rent_payment_frequency: str = "annual"  # "annual" ($/SF/yr) or "monthly" ($/unit/mo)
+    concession_timing_mode: str = "blended"
+    concession_year1_months: Decimal | None = None
+    concession_year2_months: Decimal | None = None
+    concession_year3_months: Decimal | None = None
+    concession_year4_months: Decimal | None = None
+    concession_year5_months: Decimal | None = None
+    concession_stabilized_months: Decimal | None = None
 
 
 @dataclass(frozen=True)

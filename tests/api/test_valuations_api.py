@@ -1,6 +1,11 @@
 """End-to-end API tests for the full valuation workflow."""
+from decimal import Decimal
+
 import pytest
 from httpx import AsyncClient
+
+from src.engine.dcf import discount_cash_flows
+from src.schemas.cashflow import AnnualCashFlowSummary
 
 
 async def _setup_office_property(client: AsyncClient) -> dict:
@@ -326,3 +331,45 @@ class TestValuationWorkflow:
         data_default = run_default.json()
         assert data_default["rent_roll"][0]["lease_type"] == "in_place"
         assert float(data_default["key_metrics"]["weighted_avg_lease_term_years"]) > 0
+
+    async def test_cached_full_report_preserves_pv_metrics(self, client: AsyncClient):
+        ids = await _setup_office_property(client)
+        prop_id = ids["property_id"]
+
+        val = await client.post(f"/api/v1/properties/{prop_id}/valuations", json={
+            "name": "PV Cache Test",
+            "discount_rate": "0.08",
+            "exit_cap_rate": "0.065",
+            "use_mid_year_convention": True,
+        })
+        assert val.status_code == 201
+        val_id = val.json()["id"]
+
+        run = await client.post(f"/api/v1/valuations/{val_id}/run")
+        assert run.status_code == 200
+        run_data = run.json()
+
+        full_resp = await client.get(f"/api/v1/valuations/{val_id}/reports/full")
+        assert full_resp.status_code == 200
+        full = full_resp.json()
+
+        run_metrics = run_data["key_metrics"]
+        full_metrics = full["key_metrics"]
+        full_pv_cfs = Decimal(full_metrics["pv_of_cash_flows"])
+        full_pv_tv = Decimal(full_metrics["pv_of_terminal_value"])
+        run_pv_cfs = Decimal(run_metrics["pv_of_cash_flows"])
+        run_pv_tv = Decimal(run_metrics["pv_of_terminal_value"])
+        assert full_pv_cfs > 0
+        assert full_pv_tv > 0
+        assert abs(full_pv_cfs - run_pv_cfs) < Decimal("0.01")
+        assert abs(full_pv_tv - run_pv_tv) < Decimal("0.01")
+
+        annual_cfs = [AnnualCashFlowSummary(**row) for row in full["annual_cash_flows"]]
+        expected_pv_cfs, expected_pv_tv, _ = discount_cash_flows(
+            annual_cfs=annual_cfs,
+            terminal_value=Decimal(full_metrics["terminal_value"]),
+            discount_rate=Decimal("0.08"),
+            use_mid_year=True,
+        )
+        assert abs(full_pv_cfs - expected_pv_cfs) < Decimal("0.01")
+        assert abs(full_pv_tv - expected_pv_tv) < Decimal("0.01")

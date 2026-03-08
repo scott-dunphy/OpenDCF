@@ -95,6 +95,10 @@ Frontend note:
 - The UI displays and accepts percent fields as whole percentages (e.g., `5.00%`) but sends decimals to the API (`0.05`).
 - Multifamily/self-storage market rents are shown with whole-dollar formatting (`$#,##0`) with no decimals.
 - In valuation reports, `Other Income` is shown as its own annual cash-flow line item (with optional category detail).
+- In `Edit In-Place Rent/Unit`, smart paste is enabled:
+  - Paste a single numeric value into a rent cell to fill down remaining rent rows.
+  - Paste tab/newline spreadsheet ranges (Excel/Sheets TSV) to apply sequentially.
+  - Invalid pasted cells are highlighted and reported in toast feedback.
 
 ### Recovery Types
 - `nnn` — tenant pays all recoverable expenses (triple net)
@@ -181,7 +185,19 @@ Leases:
 - `GET /api/v1/suites/{suite_id}/leases`
 - `GET /api/v1/leases/{lease_id}`
 - `PUT /api/v1/leases/{lease_id}`
+- `PATCH /api/v1/leases/bulk`
 - `DELETE /api/v1/leases/{lease_id}`
+
+Bulk lease update endpoint (`PATCH /api/v1/leases/bulk`):
+- Request shape:
+  - `atomic` (boolean, default `false`)
+  - `updates` (array, required): `{ lease_id, fields }` where `fields` matches `LeaseUpdate`
+- Response shape:
+  - `updated_count` (int)
+  - `failed` (array): `{ lease_id, status_code, detail }`
+- Behavior:
+  - `atomic: false` applies valid updates and returns per-item failures.
+  - `atomic: true` rolls back all updates on first failure.
 
 Lease sub-resources:
 - `POST /api/v1/leases/{lease_id}/rent-steps`
@@ -190,6 +206,20 @@ Lease sub-resources:
 - `DELETE /api/v1/leases/{lease_id}/free-rent-periods/{frp_id}`
 - `POST /api/v1/leases/{lease_id}/expense-recoveries`
 - `DELETE /api/v1/leases/{lease_id}/expense-recoveries/{override_id}`
+- `PATCH /api/v1/leases/expense-recoveries/bulk`
+
+Bulk expense recovery override endpoint (`PATCH /api/v1/leases/expense-recoveries/bulk`):
+- Request shape:
+  - `atomic` (boolean, default `false`)
+  - `updates` (array, required): `{ lease_id, override_id?, fields }`
+  - `fields` matches `LeaseExpenseRecoveryCreate` (full override payload)
+  - `override_id` omitted → create new override; provided → update existing override for that lease
+- Response shape:
+  - `upserted_count` (int)
+  - `failed` (array): `{ lease_id, override_id, status_code, detail }`
+- Behavior:
+  - `atomic: false` applies valid items and returns per-item failures.
+  - `atomic: true` rolls back all changes on first failure.
 
 Operating expenses:
 - `POST /api/v1/properties/{property_id}/expenses`
@@ -256,6 +286,8 @@ For complete field specifications, read the reference file:
 - Market profiles link to suites via `space_type` string matching — make sure they match exactly
 - For multifamily, suites represent unit types (e.g., "1BR", "2BR"), not individual apartments. The `area` field is the unit count, not square footage.
 - For multifamily/self-storage, market leasing assumptions are streamlined in the rent roll: market rent and in-place rent are adjacent, and both rent/unit and growth % are editable inline from the rent roll.
+- For high-volume lease rent edits, prefer `PATCH /api/v1/leases/bulk` over many single `PUT /leases/{lease_id}` calls.
+- For high-volume lease expense recovery override edits, prefer `PATCH /api/v1/leases/expense-recoveries/bulk` over many single POST calls.
 - OM ingestion convention: treat OM pro forma values as Year 1 inputs; treat historical/T-12 values as Year 0 context and normalize/roll them into Year 1 assumptions before running valuation.
 - You can create multiple valuations with different assumptions (base case, upside, downside) on the same property
 - After creating a valuation, you must POST to `/valuations/{id}/run` to execute the engine

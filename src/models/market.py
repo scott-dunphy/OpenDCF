@@ -44,4 +44,13 @@ class MarketLeasingProfile(Base, UUIDPrimaryKey, TimestampMixin):
     general_vacancy_pct: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal("0.05"))
     credit_loss_pct: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal("0.01"))
 
+    # Unit-type concession timing controls (multifamily/self-storage)
+    concession_timing_mode: Mapped[str] = mapped_column(String(20), default="blended")
+    concession_year1_months: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    concession_year2_months: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    concession_year3_months: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    concession_year4_months: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    concession_year5_months: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    concession_stabilized_months: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+
     property: Mapped["Property"] = relationship(back_populates="market_leasing_profiles")  # type: ignore[name-defined]

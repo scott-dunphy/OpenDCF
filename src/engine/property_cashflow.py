@@ -163,10 +163,44 @@ def _project_suite_by_occupancy(
 
     During in-place lease terms: uses actual contract rent (same as commercial).
     After lease expiry: revenue = market_rent × units, with general vacancy
-    handled in the waterfall. Turnover costs spread as monthly TI.
+    handled in the waterfall. Turnover costs are spread as monthly TI.
+    Market concessions support two modes:
+      - blended (default): expected drag using renewal probability
+      - timed: explicit concession months by analysis year (Y1-Y5 + stabilized)
     """
     all_slices: list[MonthlySlice] = []
     sorted_leases = sorted(suite_leases, key=lambda l: l.start_date)
+
+    # Turnover cost: turnover_rate × units × cost_per_turn / 12
+    turnover_rate = Decimal(1) - market.renewal_probability
+    cost_per_turn = market.new_ti_per_sf  # reuse TI field as $/unit turnover cost
+    monthly_turnover = -(turnover_rate * suite.area * cost_per_turn / Decimal(12))
+    blended_concession_months = (
+        turnover_rate * Decimal(str(market.new_free_rent_months))
+        + market.renewal_probability * Decimal(str(market.renewal_free_rent_months))
+    )
+
+    def _timed_concession_months(year_number: int) -> Decimal | None:
+        if year_number <= 1:
+            return market.concession_year1_months
+        if year_number == 2:
+            return market.concession_year2_months
+        if year_number == 3:
+            return market.concession_year3_months
+        if year_number == 4:
+            return market.concession_year4_months
+        if year_number == 5:
+            return market.concession_year5_months
+        return market.concession_stabilized_months
+
+    def _concession_drag_pct_for_year(year_number: int, blended_months: Decimal) -> Decimal:
+        concession_months = blended_months
+        if (market.concession_timing_mode or "blended") == "timed":
+            timed = _timed_concession_months(year_number)
+            if timed is not None:
+                concession_months = timed
+        drag_pct = concession_months / Decimal(12)
+        return max(Decimal(0), min(Decimal(1), drag_pct))
 
     # Project in-place leases for their active terms
     in_place_months: set[int] = set()  # month_index values covered by in-place leases
@@ -180,12 +214,17 @@ def _project_suite_by_occupancy(
             )
             for s in slices:
                 in_place_months.add(s.month_index)
+                # Multifamily/storage concession drag applies to occupied months,
+                # including in-place rent roll months.
+                fy = fiscal_year_for_month(analysis, s.period_start)
+                fy_num = fy.year_number if fy else 1
+                concession_drag_pct = _concession_drag_pct_for_year(
+                    fy_num, blended_concession_months
+                )
+                concession_adj = -(s.base_rent * concession_drag_pct)
+                s.free_rent_adjustment += concession_adj
+                s.effective_rent = s.base_rent + s.free_rent_adjustment
             all_slices.extend(slices)
-
-    # Turnover cost: turnover_rate × units × cost_per_turn / 12
-    turnover_rate = Decimal(1) - market.renewal_probability
-    cost_per_turn = market.new_ti_per_sf  # reuse TI field as $/unit turnover cost
-    monthly_turnover = -(turnover_rate * suite.area * cost_per_turn / Decimal(12))
 
     # Fill non-in-place months with occupancy-based market rent
     for month_idx in range(analysis.num_months):
@@ -210,6 +249,12 @@ def _project_suite_by_occupancy(
         else:
             monthly_revenue = grown_rent * suite.area / Decimal(12)
 
+        concession_drag_pct = _concession_drag_pct_for_year(
+            fy_num, blended_concession_months
+        )
+        free_rent_adj = -(monthly_revenue * concession_drag_pct)
+        effective_revenue = monthly_revenue + free_rent_adj
+
         all_slices.append(MonthlySlice(
             month_index=month_idx,
             period_start=period_start,
@@ -218,8 +263,8 @@ def _project_suite_by_occupancy(
             lease_id=f"mkt_occ_{suite.suite_id}",
             tenant_name="Market Occupancy",
             base_rent=monthly_revenue,
-            free_rent_adjustment=Decimal(0),
-            effective_rent=monthly_revenue,
+            free_rent_adjustment=free_rent_adj,
+            effective_rent=effective_revenue,
             expense_recovery=Decimal(0),  # attached later by expense engine
             percentage_rent=Decimal(0),
             ti_cost=monthly_turnover,

@@ -489,6 +489,15 @@ input, select, textarea { font-family: inherit; }
     font-weight: 600;
 }
 
+.tab-item--subtle {
+    color: var(--text-tertiary);
+    font-size: 0.78rem;
+}
+
+.tab-item--subtle.active {
+    color: var(--text);
+}
+
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
@@ -503,7 +512,7 @@ input, select, textarea { font-family: inherit; }
 .data-table .col-actions {
     position: sticky;
     right: 0;
-    background: inherit;
+    background: var(--bg);
     z-index: 1;
 }
 
@@ -949,6 +958,16 @@ input, select, textarea { font-family: inherit; }
     letter-spacing: -0.01em;
 }
 
+.form-memory-hint {
+    margin: -12px 0 16px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+}
+
 .form-group {
     margin-bottom: 16px;
 }
@@ -978,6 +997,11 @@ input, select, textarea { font-family: inherit; }
     box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
 }
 
+.form-input.paste-invalid {
+    border-color: var(--red);
+    box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.15);
+}
+
 .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -991,6 +1015,41 @@ input, select, textarea { font-family: inherit; }
     margin-top: 28px;
     padding-top: 20px;
     border-top: 1px solid var(--border-light);
+}
+
+.bulk-editor-modal {
+    width: min(1400px, 96vw);
+    max-height: 88vh;
+}
+
+.bulk-editor-tools {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.bulk-editor-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    margin-bottom: 8px;
+}
+
+.bulk-editor-table {
+    min-width: 980px;
+    margin-bottom: 0;
+}
+
+.bulk-editor-table .form-input {
+    min-width: 120px;
+    padding: 8px 10px;
+    font-size: 0.85rem;
+}
+
+.bulk-input-checkbox {
+    width: 16px;
+    height: 16px;
 }
 
 /* --- Toast Notifications --- */
@@ -1121,6 +1180,117 @@ input, select, textarea { font-family: inherit; }
     margin-top: 0;
     padding-top: 0;
     border-top: none;
+}
+
+.form-section-collapsible {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.form-section-collapsible:hover {
+    color: var(--accent);
+}
+
+.form-section-chevron {
+    display: inline-block;
+    transition: transform 0.15s var(--ease);
+    font-size: 0.7rem;
+}
+
+.form-section-chevron.collapsed {
+    transform: rotate(-90deg);
+}
+
+.form-section-badge {
+    margin-left: auto;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    background: var(--bg-secondary);
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+}
+
+.form-section-body {
+    /* wrapper for collapsible section content */
+}
+
+/* Effective Assumptions Panel (Lease Detail) */
+.effective-assumptions {
+    background: var(--blue-bg);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    margin-bottom: 20px;
+}
+
+.effective-assumptions-title {
+    font-size: 0.73rem;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 10px;
+}
+
+.effective-assumptions-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 16px;
+}
+
+.effective-assumptions-grid > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.effective-label {
+    font-size: 0.73rem;
+    color: var(--text-tertiary);
+}
+
+.effective-value {
+    font-size: 0.84rem;
+    color: var(--text);
+}
+
+.effective-value em {
+    font-style: normal;
+    font-size: 0.7rem;
+    color: var(--text-tertiary);
+}
+
+/* Concession Timing Inline Table */
+.concession-timing-table {
+    margin-bottom: 16px;
+}
+
+.concession-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+}
+
+.concession-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.concession-cell-label {
+    font-size: 0.7rem;
+    color: var(--text-tertiary);
+    text-align: center;
+    font-weight: 500;
+}
+
+.concession-cell-input {
+    text-align: center;
+    padding: 6px 4px !important;
+    font-size: 0.82rem;
 }
 
 .form-checkbox-row {

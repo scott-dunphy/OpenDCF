@@ -588,16 +588,15 @@ class TestVacantSuiteParity:
 
 
 # ---------------------------------------------------------------------------
-# Scenario 6: Non-December Fiscal Year End (June 30)
+# Scenario 6: Analysis-Year Buckets (Start-Date Anchored)
 #
-# Analysis starts Jan 1 2025, fiscal year ends June 30.
-# Year 1 = Jan–Jun 2025 (6 months), Year 2 = Jul 2025–Jun 2026 (12 months), etc.
-# In-place flat NNN lease covering full period.
-# Year 1 GPR should be approximately half of Year 2+ GPR.
+# Analysis starts Jan 1 2025. Annual cash flow buckets are always 12 months
+# anchored to the analysis start date (Year 1 = Jan-Dec 2025, Year 2 = Jan-Dec 2026).
+# `fiscal_year_end_month` is still accepted but does not change annual boundaries.
 # ---------------------------------------------------------------------------
 
-class TestNonDecemberFiscalYear:
-    """Fiscal year ending June 30 — Year 1 is a partial year."""
+class TestAnalysisYearBuckets:
+    """Annual buckets are rolling 12-month periods from analysis start."""
 
     @pytest.fixture
     def scenario(self):
@@ -636,7 +635,7 @@ class TestNonDecemberFiscalYear:
         result = run_valuation(
             property_start_date=date(2025, 1, 1),
             analysis_period_months=120,
-            fiscal_year_end_month=6,    # June 30 fiscal year end
+            fiscal_year_end_month=6,    # accepted for compatibility
             suites=[suite],
             leases=[lease],
             market_assumptions={"office": market},
@@ -645,32 +644,80 @@ class TestNonDecemberFiscalYear:
         )
         return result
 
-    def test_first_fiscal_year_is_partial(self, scenario):
-        """Year 1 runs Jan–Jun 2025 (6 months). Year 2 starts Jul 2025."""
+    def test_first_year_is_full_twelve_months(self, scenario):
+        """Year 1 runs Jan 1 2025 through Dec 31 2025."""
         fy1 = scenario.annual_cash_flows[0]
         assert fy1.period_start == date(2025, 1, 1)
-        assert fy1.period_end == date(2025, 6, 30)
+        assert fy1.period_end == date(2025, 12, 31)
 
-    def test_second_fiscal_year_is_full(self, scenario):
-        """Year 2 runs Jul 2025–Jun 2026 (12 months)."""
+    def test_second_year_rolls_from_start_anchor(self, scenario):
+        """Year 2 runs Jan 1 2026 through Dec 31 2026."""
         fy2 = scenario.annual_cash_flows[1]
-        assert fy2.period_start == date(2025, 7, 1)
-        assert fy2.period_end == date(2026, 6, 30)
+        assert fy2.period_start == date(2026, 1, 1)
+        assert fy2.period_end == date(2026, 12, 31)
 
-    def test_year1_gpr_is_half_of_year2(self, scenario):
-        """Flat rent: Year 1 (6 months) GPR ≈ half of Year 2 (12 months) GPR."""
+    def test_year1_gpr_matches_year2_for_flat_rent(self, scenario):
+        """Flat rent and full 12-month years => Year 1 GPR ≈ Year 2 GPR."""
         fy1_gpr = scenario.annual_cash_flows[0].gross_potential_rent
         fy2_gpr = scenario.annual_cash_flows[1].gross_potential_rent
         ratio = fy1_gpr / fy2_gpr
-        assert abs(ratio - Decimal("0.5")) < Decimal("0.01"), (
-            f"Year 1/Year 2 GPR ratio = {ratio:.4f}, expected 0.5"
+        assert abs(ratio - Decimal("1.0")) < Decimal("0.01"), (
+            f"Year 1/Year 2 GPR ratio = {ratio:.4f}, expected 1.0"
         )
 
     def test_full_year_gpr_correct(self, scenario):
-        """Year 2 (full 12-month fiscal year): GPR = $24 * 10,000 = $240,000."""
+        """Year 2 (full 12-month bucket): GPR = $24 * 10,000 = $240,000."""
         fy2 = scenario.annual_cash_flows[1]
         expected = Decimal("240000")
         assert abs(fy2.gross_potential_rent - expected) < _tol(expected)
+
+    def test_april_start_rolls_to_march_year_end(self):
+        suite = SuiteInput(
+            suite_id="suite_apr",
+            suite_name="Suite APR",
+            area=Decimal("10000"),
+            space_type="office",
+        )
+        lease = LeaseInput(
+            lease_id="lease_apr",
+            suite_id="suite_apr",
+            tenant_name="APR Tenant",
+            area=Decimal("10000"),
+            start_date=date(2025, 4, 1),
+            end_date=date(2030, 3, 31),
+            base_rent_per_unit=Decimal("24.00"),
+            rent_payment_frequency="annual",
+            escalation_type="flat",
+            escalation_pct=None,
+            cpi_floor=None,
+            cpi_cap=None,
+            rent_steps=(),
+            free_rent_periods=(),
+            recovery_type="nnn",
+            pro_rata_share=None,
+            base_year_stop_amount=None,
+            expense_stop_per_sf=None,
+            recovery_overrides=(),
+            pct_rent_breakpoint=None,
+            pct_rent_rate=None,
+            renewal_probability_override=None,
+        )
+        result = run_valuation(
+            property_start_date=date(2025, 4, 1),
+            analysis_period_months=24,
+            fiscal_year_end_month=12,
+            suites=[suite],
+            leases=[lease],
+            market_assumptions={"office": _make_market(gen_vacancy=Decimal("0.05"), credit_loss=Decimal("0.01"))},
+            expenses=[],
+            params=_make_params(),
+        )
+        y1 = result.annual_cash_flows[0]
+        y2 = result.annual_cash_flows[1]
+        assert y1.period_start == date(2025, 4, 1)
+        assert y1.period_end == date(2026, 3, 31)
+        assert y2.period_start == date(2026, 4, 1)
+        assert y2.period_end == date(2027, 3, 31)
 
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ cash flows following the standard CRE waterfall:
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import timedelta
 from decimal import Decimal
 
 from src.engine.date_utils import add_months, end_of_month
@@ -129,12 +129,12 @@ def _grossed_up_opex_amount(
     return annual_exp * (ref / actual_occupancy)
 
 
-def _avg_occupancy_for_fiscal_year(
+def _avg_occupancy_for_analysis_year(
     analysis: AnalysisPeriod,
     fy: FiscalYear,
     occupancy_by_month: list[Decimal] | None,
 ) -> Decimal:
-    """Average monthly occupancy within a fiscal year."""
+    """Average monthly occupancy within an analysis-year bucket."""
     if not occupancy_by_month:
         return Decimal(1)
 
@@ -149,33 +149,22 @@ def _avg_occupancy_for_fiscal_year(
     return sum(occ_values) / Decimal(str(len(occ_values)))
 
 
-def _full_fiscal_year_bounds(anchor_date: date, fiscal_year_end_month: int) -> tuple[date, date]:
+def _analysis_year_coverage_factor(fy: FiscalYear) -> Decimal:
     """
-    Return the unclipped fiscal-year start/end that contains `anchor_date`.
-    """
-    fy_end = end_of_month(date(anchor_date.year, fiscal_year_end_month, 1))
-    if anchor_date > fy_end:
-        fy_end = end_of_month(date(anchor_date.year + 1, fiscal_year_end_month, 1))
-
-    start_month = 1 if fiscal_year_end_month == 12 else fiscal_year_end_month + 1
-    start_year = fy_end.year if fiscal_year_end_month == 12 else fy_end.year - 1
-    fy_start = date(start_year, start_month, 1)
-    return fy_start, fy_end
-
-
-def _fiscal_year_coverage_factor(fy: FiscalYear, fiscal_year_end_month: int) -> Decimal:
-    """
-    Fraction of a full fiscal year represented by this (possibly stub) FY.
+    Fraction of a full 12-month analysis year represented by this bucket.
 
     Uses month-level proration so full months contribute 1.0 and partial months
-    contribute day-fractions. A full fiscal year returns 1.0.
+    contribute day-fractions. A full 12-month analysis year returns 1.0.
     """
-    full_start, _ = _full_fiscal_year_bounds(fy.start_date, fiscal_year_end_month)
+    full_start = fy.start_date
+    full_end = add_months(full_start, 12) - timedelta(days=1)
     covered_months = Decimal(0)
 
     for i in range(12):
         month_start = add_months(full_start, i)
         month_end = end_of_month(month_start)
+        if month_start > full_end:
+            break
         overlap_start = max(month_start, fy.start_date)
         overlap_end = min(month_end, fy.end_date)
         if overlap_start > overlap_end:
@@ -205,7 +194,7 @@ def build_annual_waterfall(
     Aggregate suite-level monthly slices into annual property cash flows.
 
     Returns:
-      - list of AnnualPropertyCashFlow (one per fiscal year)
+      - list of AnnualPropertyCashFlow (one per analysis-year bucket)
       - list of SuiteAnnualCashFlow (per-suite per-year for tenant detail report)
     """
     gen_vac_rate = _blended_vacancy_rate(suites, market_map)
@@ -223,9 +212,9 @@ def build_annual_waterfall(
 
     for fy in analysis.fiscal_years:
         year = fy.year_number
-        fy_coverage_factor = _fiscal_year_coverage_factor(fy, analysis.fiscal_year_end_month)
+        fy_coverage_factor = _analysis_year_coverage_factor(fy)
 
-        # Bucket monthly slices for this fiscal year
+        # Bucket monthly slices for this analysis-year bucket
         gpr = Decimal(0)
         free_rent_total = Decimal(0)
         absorption_vac = Decimal(0)
@@ -253,7 +242,7 @@ def build_annual_waterfall(
             space_type = suite_type_map.get(suite_id, "")
             mkt = market_map.get(space_type)
 
-            # Market rent for this suite in this fiscal year (steps by FY number)
+            # Market rent for this suite in this analysis year (steps by year number)
             mkt_monthly = Decimal(0)
             if mkt:
                 grown_rent = market_rent_at_year(
@@ -322,7 +311,7 @@ def build_annual_waterfall(
         credit_loss = -(scheduled_rent * credit_loss_rate)
         egi = gpi + gen_vac_loss + credit_loss
 
-        fy_avg_occ = _avg_occupancy_for_fiscal_year(analysis, fy, occupancy_by_month)
+        fy_avg_occ = _avg_occupancy_for_analysis_year(analysis, fy, occupancy_by_month)
 
         # Fixed operating expenses (non_egi_expenses already excludes pct-of-EGI items)
         opex = Decimal(0)

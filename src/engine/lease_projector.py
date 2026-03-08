@@ -72,12 +72,19 @@ def _free_rent_factor(
     period_start: date,
     period_end: date,
     for_base_rent: bool,
+    lease_start: date | None = None,
+    lease_end: date | None = None,
 ) -> Decimal:
     """
-    Returns the fraction of the month that is in a free-rent abatement period.
-    1.0 = full month free, 0.0 = no abatement.
+    Returns the fraction of active lease days in the period that are free-rent days.
+    1.0 = all active days are free, 0.0 = no free-rent overlap.
     """
-    total_days = (period_end - period_start).days + 1
+    active_window_start = max(period_start, lease_start) if lease_start is not None else period_start
+    active_window_end = min(period_end, lease_end) if lease_end is not None else period_end
+    if active_window_start > active_window_end:
+        return Decimal(0)
+
+    total_days = (active_window_end - active_window_start).days + 1
     free_days = 0
 
     for frp in free_rent_periods:
@@ -86,8 +93,8 @@ def _free_rent_factor(
         if not for_base_rent and not frp.applies_to_recoveries:
             continue
 
-        overlap_start = max(period_start, frp.start_date)
-        overlap_end = min(period_end, frp.end_date)
+        overlap_start = max(active_window_start, frp.start_date)
+        overlap_end = min(active_window_end, frp.end_date)
         if overlap_start <= overlap_end:
             free_days += (overlap_end - overlap_start).days + 1
 
@@ -135,7 +142,12 @@ def project_lease_cash_flows(
 
         # Free rent on base rent
         free_base_factor = _free_rent_factor(
-            lease.free_rent_periods, period_start, period_end, for_base_rent=True
+            lease.free_rent_periods,
+            period_start,
+            period_end,
+            for_base_rent=True,
+            lease_start=lease.start_date,
+            lease_end=lease.end_date,
         )
         free_rent_adj = -monthly_rent * free_base_factor
 

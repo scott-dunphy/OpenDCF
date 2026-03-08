@@ -65,6 +65,11 @@ class PropertyBase(BaseModel):
 
 
 class PropertyCreate(PropertyBase):
+    analysis_start_date: date = Field(
+        default_factory=date.today,
+        description="Analysis start date. Defaults to today's date if omitted.",
+    )
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {

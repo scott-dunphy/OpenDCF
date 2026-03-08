@@ -235,6 +235,57 @@ class TestFreeRent:
         # 9 months at $2,000 = $18,000
         assert total_effective == Decimal("18000.00")
 
+    def test_mid_year_partial_start_full_free_month_zeros_effective_rent(self):
+        """
+        If a lease starts mid-month and all active days are free, effective rent
+        for that partial month should be zero (no double-proration).
+        """
+        free_rent = (FreeRentPeriodInput(
+            start_date=date(2025, 7, 15),
+            end_date=date(2025, 7, 31),
+            applies_to_base_rent=True,
+            applies_to_recoveries=False,
+        ),)
+        lease = make_lease(
+            start=date(2025, 7, 15),
+            end=date(2025, 12, 31),
+            rent=Decimal("24.00"),
+            area=Decimal("1000"),
+            free_rent_periods=free_rent,
+        )
+        analysis = make_analysis(start=date(2025, 1, 1), months=12)
+        slices = project_lease_cash_flows(lease, analysis)
+
+        first = slices[0]  # Jul 2025
+        assert first.period_start == date(2025, 7, 1)
+        assert abs(first.effective_rent - Decimal("0")) < Decimal("0.01")
+        assert abs(first.free_rent_adjustment + first.base_rent) < Decimal("0.01")
+
+    def test_mid_year_partial_start_partial_free_days_apply_to_active_days_only(self):
+        """
+        Free-rent fraction should be measured against active lease days in the
+        month, not total calendar month days.
+        """
+        free_rent = (FreeRentPeriodInput(
+            start_date=date(2025, 7, 15),
+            end_date=date(2025, 7, 23),  # 9 free days out of 17 active days
+            applies_to_base_rent=True,
+            applies_to_recoveries=False,
+        ),)
+        lease = make_lease(
+            start=date(2025, 7, 15),
+            end=date(2025, 12, 31),
+            rent=Decimal("24.00"),
+            area=Decimal("1000"),
+            free_rent_periods=free_rent,
+        )
+        analysis = make_analysis(start=date(2025, 1, 1), months=12)
+        slices = project_lease_cash_flows(lease, analysis)
+
+        first = slices[0]  # Jul 2025
+        expected_effective = first.base_rent * Decimal("8") / Decimal("17")
+        assert abs(first.effective_rent - expected_effective) < Decimal("0.01")
+
 
 class TestCPIEscalation:
     def _cpi_lease(

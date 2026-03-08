@@ -153,6 +153,17 @@ class TestDiscounting:
         expected = Decimal("671008.14")
         assert abs(pv_cfs - expected) < Decimal("1")
 
+    def test_mid_year_terminal_value_uses_half_year_discount(self):
+        cfs = make_annual_cfs([100_000] * 10)
+        terminal_value = Decimal("1000000")
+
+        _, pv_tv, _ = discount_cash_flows(
+            cfs, terminal_value, Decimal("0.08"), use_mid_year=True
+        )
+
+        expected = terminal_value / (Decimal("1.08") ** Decimal("9.5"))
+        assert abs(pv_tv - expected) < Decimal("0.01")
+
 
 class TestIRR:
     def test_known_irr(self):

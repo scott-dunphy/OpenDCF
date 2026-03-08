@@ -55,34 +55,28 @@ def build_analysis_period(
     fiscal_year_end_month: int,
 ) -> AnalysisPeriod:
     """
-    Build the AnalysisPeriod with pre-computed fiscal years.
-    Fiscal years run from (fiscal_year_end_month+1) of one year through
-    fiscal_year_end_month of the next year.
-    The analysis period may not align to fiscal year boundaries.
+    Build the AnalysisPeriod with pre-computed 12-month analysis years.
+    Year 1 starts on `start_date`, Year 2 starts 12 months later, etc.
+    The final year may be partial if `num_months` is not a multiple of 12.
+
+    `fiscal_year_end_month` is retained on AnalysisPeriod for compatibility,
+    but annual aggregation is anchored to `start_date`.
     """
     end_date = add_months(start_date, num_months) - timedelta(days=1)
 
     fiscal_years: list[FiscalYear] = []
-    fy_start = start_date
+    year_start = start_date
     year_num = 1
 
-    while fy_start <= end_date:
-        # Fiscal year ends at fiscal_year_end_month of the current or next calendar year
-        fy_end_candidate = date(fy_start.year, fiscal_year_end_month, 1)
-        fy_end_candidate = end_of_month(fy_end_candidate)
-
-        if fy_end_candidate < fy_start:
-            fy_end_candidate = date(fy_start.year + 1, fiscal_year_end_month, 1)
-            fy_end_candidate = end_of_month(fy_end_candidate)
-
-        fy_end = min(fy_end_candidate, end_date)
+    while year_start <= end_date:
+        year_end = min(add_months(year_start, 12) - timedelta(days=1), end_date)
         fiscal_years.append(FiscalYear(
             year_number=year_num,
-            start_date=fy_start,
-            end_date=fy_end,
+            start_date=year_start,
+            end_date=year_end,
         ))
         year_num += 1
-        fy_start = fy_end + timedelta(days=1)
+        year_start = year_end + timedelta(days=1)
 
     return AnalysisPeriod(
         start_date=start_date,
@@ -121,7 +115,7 @@ def proration_factor(
 
 
 def fiscal_year_for_month(analysis: AnalysisPeriod, period_start: date) -> FiscalYear | None:
-    """Return the fiscal year that contains period_start."""
+    """Return the analysis-year bucket that contains period_start."""
     for fy in analysis.fiscal_years:
         if fy.start_date <= period_start <= fy.end_date:
             return fy

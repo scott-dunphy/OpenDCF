@@ -10,6 +10,10 @@ import src.models  # ensure all models registered before selectinload
 from src.models.lease import FreeRentPeriod, Lease, LeaseExpenseRecovery, RentStep, Tenant
 from src.models.property import Suite
 from src.schemas.lease import (
+    LeaseBulkUpdateRequest,
+    LeaseBulkUpdateResponse,
+    LeaseExpenseRecoveryBulkUpsertRequest,
+    LeaseExpenseRecoveryBulkUpsertResponse,
     FreeRentPeriodCreate,
     FreeRentPeriodRead,
     LeaseCreate,
@@ -99,6 +103,69 @@ async def _ensure_no_overlap(
         )
 
 
+async def _apply_lease_update(
+    db: AsyncSession,
+    lease: Lease,
+    body: LeaseUpdate,
+) -> None:
+    suite = await _get_suite_or_404(lease.suite_id, db)
+    new_start = body.lease_start_date or lease.lease_start_date
+    new_end = body.lease_end_date or lease.lease_end_date
+    if new_end <= new_start:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="lease_end_date must be after lease_start_date",
+        )
+    await _ensure_no_overlap(
+        db,
+        suite_id=lease.suite_id,
+        lease_start_date=new_start,
+        lease_end_date=new_end,
+        exclude_lease_id=lease.id,
+    )
+
+    payload = body.model_dump(exclude_unset=True)
+    if "tenant_id" in payload:
+        await _validate_tenant_for_suite(db, body.tenant_id, suite)
+    for field, value in payload.items():
+        setattr(lease, field, value)
+
+
+async def _get_expense_recovery_override_or_404(
+    lease_id: str,
+    override_id: str,
+    db: AsyncSession,
+) -> LeaseExpenseRecovery:
+    result = await db.execute(
+        select(LeaseExpenseRecovery).where(
+            LeaseExpenseRecovery.id == override_id,
+            LeaseExpenseRecovery.lease_id == lease_id,
+        )
+    )
+    override = result.scalar_one_or_none()
+    if override is None:
+        raise HTTPException(status_code=404, detail="Expense recovery override not found")
+    return override
+
+
+async def _upsert_expense_recovery_override(
+    db: AsyncSession,
+    lease_id: str,
+    override_id: str | None,
+    body: LeaseExpenseRecoveryCreate,
+) -> None:
+    await _get_lease_or_404(lease_id, db)
+    payload = body.model_dump(exclude_none=True)
+    if override_id:
+        override = await _get_expense_recovery_override_or_404(lease_id, override_id, db)
+        for field, value in payload.items():
+            setattr(override, field, value)
+        return
+
+    override = LeaseExpenseRecovery(lease_id=lease_id, **payload)
+    db.add(override)
+
+
 @router.post("/suites/{suite_id}/leases", response_model=LeaseRead, status_code=status.HTTP_201_CREATED)
 async def create_lease(
     suite_id: str,
@@ -143,27 +210,101 @@ async def update_lease(
     db: AsyncSession = Depends(get_session),
 ) -> LeaseRead:
     lease = await _get_lease_or_404(lease_id, db)
-    suite = await _get_suite_or_404(lease.suite_id, db)
-    new_start = body.lease_start_date or lease.lease_start_date
-    new_end = body.lease_end_date or lease.lease_end_date
-    if new_end <= new_start:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="lease_end_date must be after lease_start_date",
-        )
-    await _ensure_no_overlap(
-        db,
-        suite_id=lease.suite_id,
-        lease_start_date=new_start,
-        lease_end_date=new_end,
-        exclude_lease_id=lease.id,
-    )
-    if "tenant_id" in body.model_dump(exclude_none=True):
-        await _validate_tenant_for_suite(db, body.tenant_id, suite)
-    for field, value in body.model_dump(exclude_none=True).items():
-        setattr(lease, field, value)
+    await _apply_lease_update(db, lease, body)
     await db.commit()
     return await _get_lease_or_404(lease_id, db)
+
+
+@router.patch("/leases/bulk", response_model=LeaseBulkUpdateResponse)
+async def bulk_update_leases(
+    body: LeaseBulkUpdateRequest,
+    db: AsyncSession = Depends(get_session),
+) -> LeaseBulkUpdateResponse:
+    failures: list[dict[str, str | int]] = []
+    updated_count = 0
+
+    if body.atomic:
+        try:
+            for item in body.updates:
+                lease = await _get_lease_or_404(item.lease_id, db)
+                await _apply_lease_update(db, lease, item.fields)
+            await db.commit()
+            updated_count = len(body.updates)
+        except HTTPException as exc:
+            await db.rollback()
+            failures.append({
+                "lease_id": item.lease_id,
+                "status_code": exc.status_code,
+                "detail": str(exc.detail),
+            })
+        return LeaseBulkUpdateResponse(updated_count=updated_count, failed=failures)
+
+    for item in body.updates:
+        try:
+            lease = await _get_lease_or_404(item.lease_id, db)
+            await _apply_lease_update(db, lease, item.fields)
+            await db.commit()
+            updated_count += 1
+        except HTTPException as exc:
+            await db.rollback()
+            failures.append({
+                "lease_id": item.lease_id,
+                "status_code": exc.status_code,
+                "detail": str(exc.detail),
+            })
+
+    return LeaseBulkUpdateResponse(updated_count=updated_count, failed=failures)
+
+
+@router.patch("/leases/expense-recoveries/bulk", response_model=LeaseExpenseRecoveryBulkUpsertResponse)
+async def bulk_upsert_expense_recovery_overrides(
+    body: LeaseExpenseRecoveryBulkUpsertRequest,
+    db: AsyncSession = Depends(get_session),
+) -> LeaseExpenseRecoveryBulkUpsertResponse:
+    failures: list[dict[str, str | int | None]] = []
+    upserted_count = 0
+
+    if body.atomic:
+        try:
+            for item in body.updates:
+                await _upsert_expense_recovery_override(
+                    db,
+                    lease_id=item.lease_id,
+                    override_id=item.override_id,
+                    body=item.fields,
+                )
+            await db.commit()
+            upserted_count = len(body.updates)
+        except HTTPException as exc:
+            await db.rollback()
+            failures.append({
+                "lease_id": item.lease_id,
+                "override_id": item.override_id,
+                "status_code": exc.status_code,
+                "detail": str(exc.detail),
+            })
+        return LeaseExpenseRecoveryBulkUpsertResponse(upserted_count=upserted_count, failed=failures)
+
+    for item in body.updates:
+        try:
+            await _upsert_expense_recovery_override(
+                db,
+                lease_id=item.lease_id,
+                override_id=item.override_id,
+                body=item.fields,
+            )
+            await db.commit()
+            upserted_count += 1
+        except HTTPException as exc:
+            await db.rollback()
+            failures.append({
+                "lease_id": item.lease_id,
+                "override_id": item.override_id,
+                "status_code": exc.status_code,
+                "detail": str(exc.detail),
+            })
+
+    return LeaseExpenseRecoveryBulkUpsertResponse(upserted_count=upserted_count, failed=failures)
 
 
 @router.delete("/leases/{lease_id}", status_code=status.HTTP_204_NO_CONTENT)

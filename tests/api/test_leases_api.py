@@ -94,6 +94,30 @@ class TestLeaseCRUD:
         assert resp.status_code == 200
         assert resp.json()["base_rent_per_unit"] == "35.00"
 
+    async def test_update_lease_can_clear_nullable_fields(self, client: AsyncClient):
+        prop_id, suite_id = await _create_suite(client)
+        tenant = await client.post(f"/api/v1/properties/{prop_id}/tenants", json={"name": "Assigned Tenant"})
+        assert tenant.status_code == 201
+
+        lease = await _create_lease(
+            client,
+            suite_id,
+            tenant_id=tenant.json()["id"],
+            expense_stop_per_sf="12.50",
+            recovery_structure_id=None,
+        )
+        lease_id = lease["id"]
+        assert lease["tenant_id"] == tenant.json()["id"]
+        assert lease["expense_stop_per_sf"] == "12.50"
+
+        resp = await client.put(f"/api/v1/leases/{lease_id}", json={
+            "tenant_id": None,
+            "expense_stop_per_sf": None,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["tenant_id"] is None
+        assert resp.json()["expense_stop_per_sf"] is None
+
     async def test_delete_lease(self, client: AsyncClient):
         _, suite_id = await _create_suite(client)
         lease = await _create_lease(client, suite_id)
@@ -161,6 +185,83 @@ class TestLeaseCRUD:
             "lease_start_date": "2026-06-01",
         })
         assert resp.status_code == 409
+
+
+class TestBulkLeaseUpdates:
+    async def test_bulk_update_leases_partial_success(self, client: AsyncClient):
+        _, suite_a = await _create_suite(client)
+        _, suite_b = await _create_suite(client)
+        lease_a = await _create_lease(client, suite_a, base_rent_per_unit="30.00")
+        lease_b = await _create_lease(client, suite_b, base_rent_per_unit="31.00")
+
+        resp = await client.patch("/api/v1/leases/bulk", json={
+            "atomic": False,
+            "updates": [
+                {"lease_id": lease_a["id"], "fields": {"base_rent_per_unit": "35.00"}},
+                {"lease_id": "missing-lease-id", "fields": {"base_rent_per_unit": "32.00"}},
+                {"lease_id": lease_b["id"], "fields": {"base_rent_per_unit": "36.00"}},
+            ],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["updated_count"] == 2
+        assert len(data["failed"]) == 1
+        assert data["failed"][0]["lease_id"] == "missing-lease-id"
+        assert data["failed"][0]["status_code"] == 404
+
+        lease_a_after = await client.get(f"/api/v1/leases/{lease_a['id']}")
+        lease_b_after = await client.get(f"/api/v1/leases/{lease_b['id']}")
+        assert float(lease_a_after.json()["base_rent_per_unit"]) == 35.00
+        assert float(lease_b_after.json()["base_rent_per_unit"]) == 36.00
+
+    async def test_bulk_update_leases_atomic_rolls_back_on_error(self, client: AsyncClient):
+        _, suite_a = await _create_suite(client)
+        _, suite_b = await _create_suite(client)
+        lease_a = await _create_lease(client, suite_a, base_rent_per_unit="30.00")
+        lease_b = await _create_lease(client, suite_b, base_rent_per_unit="31.00")
+
+        resp = await client.patch("/api/v1/leases/bulk", json={
+            "atomic": True,
+            "updates": [
+                {"lease_id": lease_a["id"], "fields": {"base_rent_per_unit": "40.00"}},
+                {"lease_id": "missing-lease-id", "fields": {"base_rent_per_unit": "42.00"}},
+                {"lease_id": lease_b["id"], "fields": {"base_rent_per_unit": "44.00"}},
+            ],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["updated_count"] == 0
+        assert len(data["failed"]) == 1
+        assert data["failed"][0]["lease_id"] == "missing-lease-id"
+        assert data["failed"][0]["status_code"] == 404
+
+        lease_a_after = await client.get(f"/api/v1/leases/{lease_a['id']}")
+        lease_b_after = await client.get(f"/api/v1/leases/{lease_b['id']}")
+        assert float(lease_a_after.json()["base_rent_per_unit"]) == 30.00
+        assert float(lease_b_after.json()["base_rent_per_unit"]) == 31.00
+
+    async def test_bulk_update_leases_atomic_success(self, client: AsyncClient):
+        _, suite_a = await _create_suite(client)
+        _, suite_b = await _create_suite(client)
+        lease_a = await _create_lease(client, suite_a, base_rent_per_unit="30.00")
+        lease_b = await _create_lease(client, suite_b, base_rent_per_unit="31.00")
+
+        resp = await client.patch("/api/v1/leases/bulk", json={
+            "atomic": True,
+            "updates": [
+                {"lease_id": lease_a["id"], "fields": {"base_rent_per_unit": "33.00"}},
+                {"lease_id": lease_b["id"], "fields": {"base_rent_per_unit": "34.00"}},
+            ],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["updated_count"] == 2
+        assert data["failed"] == []
+
+        lease_a_after = await client.get(f"/api/v1/leases/{lease_a['id']}")
+        lease_b_after = await client.get(f"/api/v1/leases/{lease_b['id']}")
+        assert float(lease_a_after.json()["base_rent_per_unit"]) == 33.00
+        assert float(lease_b_after.json()["base_rent_per_unit"]) == 34.00
 
 
 class TestRentSteps:
@@ -297,3 +398,165 @@ class TestExpenseRecoveryOverrides:
         lease_resp = await client.get(f"/api/v1/leases/{lease_id}")
         overrides = lease_resp.json()["expense_recovery_overrides"]
         assert all(o["id"] != override_id for o in overrides)
+
+
+class TestBulkExpenseRecoveryOverrides:
+    async def test_bulk_upsert_expense_recoveries_partial_success(self, client: AsyncClient):
+        _, suite_a = await _create_suite(client)
+        _, suite_b = await _create_suite(client)
+        lease_a = await _create_lease(client, suite_a)
+        lease_b = await _create_lease(client, suite_b)
+
+        existing = await client.post(f"/api/v1/leases/{lease_a['id']}/expense-recoveries", json={
+            "expense_category": "cam",
+            "recovery_type": "nnn",
+            "admin_fee_pct": "0.10",
+        })
+        assert existing.status_code == 201
+        existing_id = existing.json()["id"]
+
+        resp = await client.patch("/api/v1/leases/expense-recoveries/bulk", json={
+            "atomic": False,
+            "updates": [
+                {
+                    "lease_id": lease_a["id"],
+                    "override_id": existing_id,
+                    "fields": {
+                        "expense_category": "cam",
+                        "recovery_type": "nnn",
+                        "admin_fee_pct": "0.20",
+                    },
+                },
+                {
+                    "lease_id": lease_b["id"],
+                    "fields": {
+                        "expense_category": "real_estate_taxes",
+                        "recovery_type": "base_year_stop",
+                        "base_year_stop_amount": "25000.00",
+                    },
+                },
+                {
+                    "lease_id": "missing-lease-id",
+                    "fields": {
+                        "expense_category": "utilities",
+                        "recovery_type": "nnn",
+                    },
+                },
+            ],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["upserted_count"] == 2
+        assert len(data["failed"]) == 1
+        assert data["failed"][0]["lease_id"] == "missing-lease-id"
+        assert data["failed"][0]["status_code"] == 404
+
+        lease_a_after = await client.get(f"/api/v1/leases/{lease_a['id']}")
+        lease_b_after = await client.get(f"/api/v1/leases/{lease_b['id']}")
+        override_a = next(o for o in lease_a_after.json()["expense_recovery_overrides"] if o["id"] == existing_id)
+        assert float(override_a["admin_fee_pct"]) == 0.20
+        assert len(lease_b_after.json()["expense_recovery_overrides"]) == 1
+        assert lease_b_after.json()["expense_recovery_overrides"][0]["expense_category"] == "real_estate_taxes"
+
+    async def test_bulk_upsert_expense_recoveries_atomic_rolls_back_on_error(self, client: AsyncClient):
+        _, suite_a = await _create_suite(client)
+        _, suite_b = await _create_suite(client)
+        lease_a = await _create_lease(client, suite_a)
+        lease_b = await _create_lease(client, suite_b)
+
+        existing = await client.post(f"/api/v1/leases/{lease_a['id']}/expense-recoveries", json={
+            "expense_category": "cam",
+            "recovery_type": "nnn",
+            "admin_fee_pct": "0.10",
+        })
+        assert existing.status_code == 201
+        existing_id = existing.json()["id"]
+
+        resp = await client.patch("/api/v1/leases/expense-recoveries/bulk", json={
+            "atomic": True,
+            "updates": [
+                {
+                    "lease_id": lease_a["id"],
+                    "override_id": existing_id,
+                    "fields": {
+                        "expense_category": "cam",
+                        "recovery_type": "nnn",
+                        "admin_fee_pct": "0.30",
+                    },
+                },
+                {
+                    "lease_id": "missing-lease-id",
+                    "fields": {
+                        "expense_category": "utilities",
+                        "recovery_type": "nnn",
+                    },
+                },
+                {
+                    "lease_id": lease_b["id"],
+                    "fields": {
+                        "expense_category": "insurance",
+                        "recovery_type": "nnn",
+                    },
+                },
+            ],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["upserted_count"] == 0
+        assert len(data["failed"]) == 1
+        assert data["failed"][0]["lease_id"] == "missing-lease-id"
+        assert data["failed"][0]["status_code"] == 404
+
+        lease_a_after = await client.get(f"/api/v1/leases/{lease_a['id']}")
+        lease_b_after = await client.get(f"/api/v1/leases/{lease_b['id']}")
+        override_a = next(o for o in lease_a_after.json()["expense_recovery_overrides"] if o["id"] == existing_id)
+        assert float(override_a["admin_fee_pct"]) == 0.10
+        assert lease_b_after.json()["expense_recovery_overrides"] == []
+
+    async def test_bulk_upsert_expense_recoveries_atomic_success(self, client: AsyncClient):
+        _, suite_a = await _create_suite(client)
+        _, suite_b = await _create_suite(client)
+        lease_a = await _create_lease(client, suite_a)
+        lease_b = await _create_lease(client, suite_b)
+
+        existing = await client.post(f"/api/v1/leases/{lease_a['id']}/expense-recoveries", json={
+            "expense_category": "cam",
+            "recovery_type": "nnn",
+            "admin_fee_pct": "0.10",
+        })
+        assert existing.status_code == 201
+        existing_id = existing.json()["id"]
+
+        resp = await client.patch("/api/v1/leases/expense-recoveries/bulk", json={
+            "atomic": True,
+            "updates": [
+                {
+                    "lease_id": lease_a["id"],
+                    "override_id": existing_id,
+                    "fields": {
+                        "expense_category": "cam",
+                        "recovery_type": "nnn",
+                        "admin_fee_pct": "0.22",
+                    },
+                },
+                {
+                    "lease_id": lease_b["id"],
+                    "fields": {
+                        "expense_category": "utilities",
+                        "recovery_type": "modified_gross",
+                        "cap_per_sf_annual": "3.50",
+                    },
+                },
+            ],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["upserted_count"] == 2
+        assert data["failed"] == []
+
+        lease_a_after = await client.get(f"/api/v1/leases/{lease_a['id']}")
+        lease_b_after = await client.get(f"/api/v1/leases/{lease_b['id']}")
+        override_a = next(o for o in lease_a_after.json()["expense_recovery_overrides"] if o["id"] == existing_id)
+        assert float(override_a["admin_fee_pct"]) == 0.22
+        assert len(lease_b_after.json()["expense_recovery_overrides"]) == 1
+        assert lease_b_after.json()["expense_recovery_overrides"][0]["expense_category"] == "utilities"

@@ -50,6 +50,8 @@ class Valuation(Base, UUIDPrimaryKey, TimestampMixin):
     result_irr: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     result_going_in_cap_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     result_exit_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    result_pv_cash_flows: Mapped[Decimal | None] = mapped_column(Numeric(24, 12))
+    result_pv_terminal_value: Mapped[Decimal | None] = mapped_column(Numeric(24, 12))
     result_equity_multiple: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     result_avg_occupancy_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     result_terminal_noi_basis: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))

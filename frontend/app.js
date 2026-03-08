@@ -3,7 +3,11 @@
    Single-page app with hash routing, API integration, Chart.js
    ============================================================ */
 
-const API = '/api/v1';
+const IS_TAURI = typeof window !== 'undefined'
+    && (window.location.protocol === 'tauri:' || '__TAURI_INTERNALS__' in window);
+const BACKEND_ORIGIN = IS_TAURI ? 'http://127.0.0.1:8011' : '';
+const API = `${BACKEND_ORIGIN}/api/v1`;
+const HEALTH_URL = `${BACKEND_ORIGIN}/health`;
 const $app = () => document.getElementById('app');
 const $bc = () => document.getElementById('breadcrumb');
 
@@ -72,6 +76,24 @@ const fmt = {
     }
 };
 
+function escapeHtmlAttr(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function fiscalYearLabel(cf) {
+    if (!cf || cf.year == null) return 'Year';
+    return `Year ${cf.year}`;
+}
+
+function fiscalYearRangeLabel(cf) {
+    if (!cf || !cf.period_start || !cf.period_end) return '';
+    return `${fmt.date(cf.period_start)} - ${fmt.date(cf.period_end)}`;
+}
+
 
 // ─── API Client ───────────────────────────────────────────────
 
@@ -110,6 +132,19 @@ const api = {
         if (res.status === 204) return null;
         return res.json();
     },
+    async patch(path, data = {}) {
+        const res = await fetch(API + path, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            throw new Error(`PATCH ${path} → ${res.status}: ${text}`);
+        }
+        if (res.status === 204) return null;
+        return res.json();
+    },
     async del(path) {
         const res = await fetch(API + path, { method: 'DELETE' });
         if (!res.ok) {
@@ -126,7 +161,7 @@ const api = {
 async function checkHealth() {
     const el = document.getElementById('apiStatus');
     try {
-        await fetch('/health');
+        await fetch(HEALTH_URL);
         el.className = 'api-status connected';
         el.querySelector('span').textContent = 'API Connected';
     } catch {
@@ -190,7 +225,131 @@ function isPerSfNumberField(field) {
     return key.includes('_per_sf') || label.includes('/SF');
 }
 
-function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
+function parseClipboardMatrix(text) {
+    return String(text || '')
+        .replace(/\r/g, '')
+        .split('\n')
+        .filter((row, i, rows) => !(i === rows.length - 1 && row === ''))
+        .map(row => row.split('\t'));
+}
+
+function areFieldsPasteCompatible(sourceField, targetField) {
+    if (!sourceField || !targetField) return false;
+    if (sourceField.type === targetField.type) return true;
+    const sourceTextLike = sourceField.type === 'text' || sourceField.type === 'textarea';
+    const targetTextLike = targetField.type === 'text' || targetField.type === 'textarea';
+    return sourceTextLike && targetTextLike;
+}
+
+function normalizePastedDate(raw) {
+    const v = String(raw || '').trim();
+    if (v === '') return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    const us = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!us) return null;
+    const mm = us[1].padStart(2, '0');
+    const dd = us[2].padStart(2, '0');
+    return `${us[3]}-${mm}-${dd}`;
+}
+
+function normalizePastedValue(raw, field, inputEl) {
+    const text = String(raw || '').trim();
+    if (text === '') return { ok: true, value: '' };
+
+    if (field.type === 'checkbox') {
+        const v = text.toLowerCase();
+        if (['true', 'yes', 'y', '1'].includes(v)) return { ok: true, value: true };
+        if (['false', 'no', 'n', '0'].includes(v)) return { ok: true, value: false };
+        return { ok: false };
+    }
+
+    if (field.type === 'number') {
+        const hasPercent = text.includes('%');
+        const cleaned = text.replace(/[$,\s]/g, '').replace(/%/g, '');
+        if (cleaned === '') return { ok: true, value: '' };
+        let n = parseFloat(cleaned);
+        if (Number.isNaN(n)) return { ok: false };
+        if (isPercentNumberField(field) && !hasPercent && Math.abs(n) <= 1) n *= 100;
+        const min = field.min != null ? parseFloat(String(field.min)) : null;
+        const max = field.max != null ? parseFloat(String(field.max)) : null;
+        if (min != null && !Number.isNaN(min) && n < min) return { ok: false };
+        if (max != null && !Number.isNaN(max) && n > max) return { ok: false };
+        return { ok: true, value: String(n) };
+    }
+
+    if (field.type === 'date') {
+        const normalized = normalizePastedDate(text);
+        if (normalized == null) return { ok: false };
+        return { ok: true, value: normalized };
+    }
+
+    if (field.type === 'select' && inputEl && inputEl.tagName === 'SELECT') {
+        const options = Array.from(inputEl.options || []);
+        const direct = options.find(opt => opt.value === text);
+        if (direct) return { ok: true, value: direct.value };
+        const byLabel = options.find(opt => opt.textContent?.trim().toLowerCase() === text.toLowerCase());
+        if (byLabel) return { ok: true, value: byLabel.value };
+        return { ok: false };
+    }
+
+    return { ok: true, value: text };
+}
+
+const FORM_MEMORY_STORAGE_KEY = 'opendcf_form_memory_v1';
+
+function getFormMemoryStore() {
+    try {
+        const raw = localStorage.getItem(FORM_MEMORY_STORAGE_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+function setFormMemoryStore(store) {
+    try {
+        localStorage.setItem(FORM_MEMORY_STORAGE_KEY, JSON.stringify(store));
+    } catch {
+        // ignore storage failures
+    }
+}
+
+function deriveFormMemoryKey(title, fields) {
+    const keySig = (fields || [])
+        .filter((f) => f && f.key && f.type !== 'section')
+        .map((f) => `${f.key}:${f.type || 'text'}`)
+        .join('|');
+    return `${title || 'form'}::${keySig}`;
+}
+
+function readFormMemory(memoryKey) {
+    if (!memoryKey) return {};
+    const store = getFormMemoryStore();
+    const row = store[memoryKey];
+    return row && typeof row === 'object' ? row : {};
+}
+
+function writeFormMemory(memoryKey, values, fields) {
+    if (!memoryKey || !values) return;
+    const next = {};
+    (fields || []).forEach((f) => {
+        if (!f || !f.key || f.type === 'section') return;
+        const v = values[f.key];
+        if (f.type === 'checkbox') {
+            next[f.key] = !!v;
+            return;
+        }
+        if (v == null || v === '') return;
+        next[f.key] = v;
+    });
+    const store = getFormMemoryStore();
+    store[memoryKey] = next;
+    setFormMemoryStore(store);
+}
+
+function showFormModal({ title, fields, initialValues, onSubmit, wide, smartPaste = false, memoryKey }) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     const modal = document.createElement('div');
@@ -205,13 +364,54 @@ function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
     const formBody = document.createElement('div');
     modal.appendChild(formBody);
 
+    const resolvedMemoryKey = memoryKey || deriveFormMemoryKey(title, fields);
+    const memoryDefaults = initialValues ? {} : readFormMemory(resolvedMemoryKey);
+    const hasMemoryDefaults = !initialValues && Object.keys(memoryDefaults).length > 0;
+
+    if (hasMemoryDefaults) {
+        const memoryHint = document.createElement('div');
+        memoryHint.className = 'form-memory-hint';
+        memoryHint.textContent = 'Prefilled from your last entry.';
+        modal.insertBefore(memoryHint, formBody);
+    }
+
     const inputEls = {};  // key → input element
     let currentRow = null;
     let currentRowCount = 0;
+    const collapsedSections = new Set();  // tracks collapsed section labels
+
+    function getVisibleInputEntries() {
+        const entries = [];
+        fields.forEach((f) => {
+            if (!f || !f.key || f.type === 'section') return;
+            const el = inputEls[f.key];
+            if (!el || !formBody.contains(el)) return;
+            entries.push({ key: f.key, field: f, el });
+        });
+        return entries;
+    }
+
+    function markPasteInvalid(el) {
+        el.classList.add('paste-invalid');
+        window.setTimeout(() => el.classList.remove('paste-invalid'), 1600);
+    }
+
+    function dispatchFieldEvents(entry) {
+        const isSelect = entry.el.tagName === 'SELECT';
+        if (entry.field.type === 'checkbox') {
+            entry.el.dispatchEvent(new Event('change', { bubbles: true }));
+            return;
+        }
+        entry.el.dispatchEvent(new Event('input', { bubbles: true }));
+        if (isSelect) entry.el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
 
     function getValues() {
         const vals = {};
+        const fieldKeys = new Set();
         fields.forEach(f => {
+            if (!f.key) return;
+            fieldKeys.add(f.key);
             const el = inputEls[f.key];
             if (!el) return;
             if (f.type === 'checkbox') vals[f.key] = el.checked;
@@ -227,6 +427,17 @@ function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
                 vals[f.key] = el.value || null;
             } else vals[f.key] = el.value;
         });
+        // Include values from custom field hidden inputs not in fields array
+        Object.keys(inputEls).forEach(key => {
+            if (fieldKeys.has(key)) return;
+            const el = inputEls[key];
+            if (!el) return;
+            if (el.value === '') vals[key] = null;
+            else {
+                const n = parseFloat(el.value);
+                vals[key] = isNaN(n) ? el.value : n;
+            }
+        });
         return vals;
     }
 
@@ -234,7 +445,18 @@ function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
         formBody.innerHTML = '';
         currentRow = null;
         currentRowCount = 0;
-        const vals = Object.keys(inputEls).length > 0 ? getValues() : (initialValues || {});
+        let currentCollapsibleWrap = null;  // wrapper div for collapsible section content
+        const vals = Object.keys(inputEls).length > 0
+            ? getValues()
+            : (initialValues || memoryDefaults || {});
+
+        // Initialize default-collapsed sections on first render
+        fields.forEach(f => {
+            if (f.type === 'section' && f.collapsible && f.defaultCollapsed && !collapsedSections._initialized) {
+                collapsedSections.add(f.label);
+            }
+        });
+        collapsedSections._initialized = true;
 
         fields.forEach(f => {
             // Conditional visibility
@@ -243,10 +465,66 @@ function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
             if (f.type === 'section') {
                 currentRow = null;
                 currentRowCount = 0;
+                currentCollapsibleWrap = null;
                 const sec = document.createElement('div');
-                sec.className = 'form-section';
-                sec.textContent = f.label;
-                formBody.appendChild(sec);
+                sec.className = 'form-section' + (f.collapsible ? ' form-section-collapsible' : '');
+                if (f.collapsible) {
+                    const isCollapsed = collapsedSections.has(f.label);
+                    const chevron = document.createElement('span');
+                    chevron.className = 'form-section-chevron' + (isCollapsed ? ' collapsed' : '');
+                    chevron.textContent = '\u25BE';
+                    sec.appendChild(chevron);
+                    const txt = document.createTextNode(' ' + f.label);
+                    sec.appendChild(txt);
+                    if (f.collapsedSummary) {
+                        const badge = document.createElement('span');
+                        badge.className = 'form-section-badge';
+                        badge.textContent = typeof f.collapsedSummary === 'function' ? f.collapsedSummary(vals) : f.collapsedSummary;
+                        sec.appendChild(badge);
+                    }
+                    const wrap = document.createElement('div');
+                    wrap.className = 'form-section-body';
+                    if (isCollapsed) wrap.style.display = 'none';
+                    sec.addEventListener('click', () => {
+                        if (collapsedSections.has(f.label)) {
+                            collapsedSections.delete(f.label);
+                            wrap.style.display = '';
+                            chevron.classList.remove('collapsed');
+                        } else {
+                            collapsedSections.add(f.label);
+                            wrap.style.display = 'none';
+                            chevron.classList.add('collapsed');
+                        }
+                    });
+                    formBody.appendChild(sec);
+                    formBody.appendChild(wrap);
+                    currentCollapsibleWrap = wrap;
+                } else {
+                    sec.textContent = f.label;
+                    formBody.appendChild(sec);
+                    currentCollapsibleWrap = null;
+                }
+                return;
+            }
+
+            const appendTarget = currentCollapsibleWrap || formBody;
+
+            if (f.type === 'custom' && f.render) {
+                currentRow = null;
+                currentRowCount = 0;
+                const container = document.createElement('div');
+                f.render(container, vals, (key, value) => {
+                    // setValue callback: update hidden inputs
+                    if (!inputEls[key]) {
+                        const hidden = document.createElement('input');
+                        hidden.type = 'hidden';
+                        hidden.id = 'form_' + key;
+                        container.appendChild(hidden);
+                        inputEls[key] = hidden;
+                    }
+                    inputEls[key].value = value;
+                });
+                appendTarget.appendChild(container);
                 return;
             }
 
@@ -266,7 +544,7 @@ function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
                 lbl.textContent = f.label;
                 row.appendChild(cb);
                 row.appendChild(lbl);
-                formBody.appendChild(row);
+                appendTarget.appendChild(row);
                 inputEls[f.key] = cb;
                 return;
             }
@@ -356,7 +634,7 @@ function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
                 if (!currentRow || currentRowCount >= 2) {
                     currentRow = document.createElement('div');
                     currentRow.className = 'form-row';
-                    formBody.appendChild(currentRow);
+                    appendTarget.appendChild(currentRow);
                     currentRowCount = 0;
                 }
                 currentRow.appendChild(group);
@@ -364,12 +642,73 @@ function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
             } else {
                 currentRow = null;
                 currentRowCount = 0;
-                formBody.appendChild(group);
+                appendTarget.appendChild(group);
             }
         });
     }
 
     renderFields();
+
+    formBody.addEventListener('paste', (event) => {
+        if (!smartPaste) return;
+        const target = event.target;
+        if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) return;
+        if (!target.id || !target.id.startsWith('form_')) return;
+        const startKey = target.id.slice(5);
+        const visibleEntries = getVisibleInputEntries();
+        const startIdx = visibleEntries.findIndex(e => e.key === startKey);
+        if (startIdx < 0) return;
+
+        const matrix = parseClipboardMatrix(event.clipboardData?.getData('text/plain') || '');
+        if (matrix.length === 0 || (matrix.length === 1 && matrix[0].length === 1 && matrix[0][0] === '')) return;
+        const flatValues = matrix.flat();
+        const startEntry = visibleEntries[startIdx];
+        const compatibleTargets = visibleEntries
+            .slice(startIdx)
+            .filter(entry => areFieldsPasteCompatible(startEntry.field, entry.field));
+
+        const singleCellPaste = flatValues.length === 1;
+        const shouldFillDown = singleCellPaste && startEntry.field.type === 'number' && compatibleTargets.length > 1;
+        const shouldHandleBulk = flatValues.length > 1 || shouldFillDown;
+        if (!shouldHandleBulk) return;
+
+        event.preventDefault();
+
+        let applied = 0;
+        let invalid = 0;
+        if (shouldFillDown) {
+            const sourceValue = flatValues[0];
+            compatibleTargets.forEach((entry) => {
+                const normalized = normalizePastedValue(sourceValue, entry.field, entry.el);
+                if (!normalized.ok) {
+                    invalid++;
+                    markPasteInvalid(entry.el);
+                    return;
+                }
+                if (entry.field.type === 'checkbox') entry.el.checked = !!normalized.value;
+                else entry.el.value = normalized.value;
+                dispatchFieldEvents(entry);
+                applied++;
+            });
+        } else {
+            compatibleTargets.slice(0, flatValues.length).forEach((entry, idx) => {
+                const normalized = normalizePastedValue(flatValues[idx], entry.field, entry.el);
+                if (!normalized.ok) {
+                    invalid++;
+                    markPasteInvalid(entry.el);
+                    return;
+                }
+                if (entry.field.type === 'checkbox') entry.el.checked = !!normalized.value;
+                else entry.el.value = normalized.value;
+                dispatchFieldEvents(entry);
+                applied++;
+            });
+            if (flatValues.length > compatibleTargets.length) invalid += (flatValues.length - compatibleTargets.length);
+        }
+
+        if (invalid > 0) toast(`Pasted ${applied} value(s), ${invalid} invalid`, 'error');
+        else if (applied > 1) toast(`Pasted ${applied} value(s)`, 'success');
+    });
 
     // Actions
     const actions = document.createElement('div');
@@ -412,6 +751,7 @@ function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
         submitBtn.disabled = true;
         try {
             await onSubmit(payload, overlay);
+            if (!initialValues) writeFormMemory(resolvedMemoryKey, vals, fields);
         } catch (err) {
             toast('Error: ' + err.message, 'error');
             submitBtn.textContent = initialValues ? 'Save Changes' : 'Create';
@@ -423,6 +763,312 @@ function showFormModal({ title, fields, initialValues, onSubmit, wide }) {
     document.body.appendChild(overlay);
     // Focus first visible input
     const firstInput = formBody.querySelector('input, select, textarea');
+    if (firstInput) firstInput.focus();
+    return overlay;
+}
+
+
+function formatBulkEditorValue(value, column) {
+    if (value == null || value === '') return '';
+    if (column.type === 'number') {
+        const n = parseFloat(value);
+        if (Number.isNaN(n)) return '';
+        if (isPercentNumberField(column)) return (n * 100).toFixed(2);
+        return String(n);
+    }
+    if (column.type === 'checkbox') return !!value;
+    return String(value);
+}
+
+function parseBulkEditorValue(inputEl, column) {
+    if (column.type === 'checkbox') return inputEl.checked;
+    if (column.type === 'number') {
+        if (inputEl.value === '') return null;
+        const n = parseFloat(inputEl.value);
+        if (Number.isNaN(n)) return null;
+        return isPercentNumberField(column) ? (n / 100) : n;
+    }
+    const v = inputEl.value;
+    return v === '' ? null : v;
+}
+
+function rowHasUserValue(row, columns) {
+    return (columns || []).some((col) => {
+        const v = row[col.key];
+        if (col.type === 'checkbox') return !!v;
+        return v != null && v !== '';
+    });
+}
+
+function buildNewBulkRow(columns, seedRow = null) {
+    const row = { id: null };
+    (columns || []).forEach((col) => {
+        if (!col || !col.key) return;
+        if (col.cloneOnAdd === false) {
+            if (col.default != null) row[col.key] = col.default;
+            else row[col.key] = col.type === 'checkbox' ? false : null;
+            return;
+        }
+        const seedVal = seedRow ? seedRow[col.key] : null;
+        if (seedVal != null && seedVal !== '') row[col.key] = seedVal;
+        else if (col.default != null) row[col.key] = col.default;
+        else row[col.key] = col.type === 'checkbox' ? false : null;
+    });
+    return row;
+}
+
+function showBulkTableEditorModal({
+    title,
+    columns,
+    rows,
+    onSave,
+    addLabel = 'Add Row',
+    intro = '',
+    extraTools = [],
+}) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'modal wide bulk-editor-modal';
+    overlay.appendChild(modal);
+
+    const initialRows = (rows && rows.length > 0)
+        ? rows.map(r => ({ ...r }))
+        : [buildNewBulkRow(columns)];
+    let workingRows = initialRows.map(r => ({ ...r }));
+    const deletedIds = [];
+
+    const colDefs = (columns || []).filter(c => c && c.key);
+    const tableColCount = colDefs.length;
+
+    function render() {
+        modal.innerHTML = `
+            <div class="modal-title">${escapeHtmlAttr(title)}</div>
+            ${intro ? `<div class="form-memory-hint">${escapeHtmlAttr(intro)}</div>` : ''}
+            <div class="bulk-editor-tools">
+                <button class="btn btn-secondary btn-sm" id="bulkAddRow">${icons.plus} ${addLabel}</button>
+                <button class="btn btn-secondary btn-sm" id="bulkFillDown">Fill Empty From Above</button>
+                <button class="btn btn-secondary btn-sm" id="bulkCopyFirst">Copy First Row To Empty Cells</button>
+                ${extraTools.map((t, i) => `<button class="btn btn-secondary btn-sm" id="bulkExtraTool${i}">${escapeHtmlAttr(t.label)}</button>`).join('')}
+            </div>
+            <div class="bulk-editor-wrap">
+                <table class="data-table bulk-editor-table" id="bulkEditorTable">
+                    <thead>
+                        <tr>
+                            ${colDefs.map(c => `<th${c.align === 'right' ? ' class="right"' : ''}>${escapeHtmlAttr(c.label)}</th>`).join('')}
+                            <th class="col-actions"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${workingRows.map((row, rowIdx) => `
+                            <tr data-row-index="${rowIdx}" data-row-id="${escapeHtmlAttr(row.id || '')}">
+                                ${colDefs.map((col, colIdx) => {
+                                    const value = formatBulkEditorValue(row[col.key], col);
+                                    if (col.type === 'checkbox') {
+                                        return `<td data-col-index="${colIdx}" class="${col.align === 'right' ? 'right' : ''}">
+                                            <input type="checkbox" class="bulk-input-checkbox" data-col-key="${col.key}" ${value ? 'checked' : ''} />
+                                        </td>`;
+                                    }
+                                    if (col.type === 'select') {
+                                        const opts = (col.options || []).map((opt) => {
+                                            const option = typeof opt === 'string' ? { value: opt, label: fmt.typeLabel(opt) } : opt;
+                                            const selected = String(option.value) === String(value ?? '') ? 'selected' : '';
+                                            return `<option value="${escapeHtmlAttr(option.value)}" ${selected}>${escapeHtmlAttr(option.label)}</option>`;
+                                        }).join('');
+                                        return `<td data-col-index="${colIdx}" class="${col.align === 'right' ? 'right' : ''}">
+                                            <select class="form-input bulk-input" data-col-key="${col.key}">${opts}</select>
+                                        </td>`;
+                                    }
+                                    const inputType = col.type === 'date' ? 'date' : (col.type === 'number' ? 'number' : 'text');
+                                    const stepAttr = col.step ? `step="${isPercentNumberField(col) ? parseFloat(String(col.step)) * 100 : col.step}"` : '';
+                                    const minAttr = col.min != null ? `min="${col.min}"` : '';
+                                    const maxAttr = col.max != null ? `max="${col.max}"` : '';
+                                    const placeholderAttr = col.placeholder ? `placeholder="${escapeHtmlAttr(col.placeholder)}"` : '';
+                                    return `<td data-col-index="${colIdx}" class="${col.align === 'right' ? 'right' : ''}">
+                                        <input type="${inputType}" class="form-input bulk-input" data-col-key="${col.key}" value="${escapeHtmlAttr(value)}" ${stepAttr} ${minAttr} ${maxAttr} ${placeholderAttr} />
+                                    </td>`;
+                                }).join('')}
+                                <td class="col-actions">
+                                    <button class="btn-icon danger" data-delete-row="${rowIdx}" title="Delete row">${icons.trash}</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="bulkCancel">Cancel</button>
+                <button class="btn btn-primary" id="bulkSave">Save All</button>
+            </div>
+        `;
+
+        const table = modal.querySelector('#bulkEditorTable');
+        const tbody = table.querySelector('tbody');
+
+        function snapshotRowsFromDom() {
+            const snapshot = [];
+            tbody.querySelectorAll('tr[data-row-index]').forEach((tr) => {
+                const row = { id: tr.getAttribute('data-row-id') || null };
+                tr.querySelectorAll('[data-col-key]').forEach((inputEl) => {
+                    const colKey = inputEl.getAttribute('data-col-key');
+                    const col = colDefs.find(c => c.key === colKey);
+                    if (!col) return;
+                    row[colKey] = parseBulkEditorValue(inputEl, col);
+                });
+                snapshot.push(row);
+            });
+            return snapshot;
+        }
+
+        function commitSnapshot() {
+            workingRows = snapshotRowsFromDom();
+        }
+
+        modal.querySelector('#bulkAddRow').onclick = () => {
+            commitSnapshot();
+            const seed = workingRows.length > 0 ? workingRows[workingRows.length - 1] : null;
+            workingRows.push(buildNewBulkRow(colDefs, seed));
+            render();
+        };
+
+        modal.querySelector('#bulkFillDown').onclick = () => {
+            commitSnapshot();
+            for (let i = 1; i < workingRows.length; i++) {
+                colDefs.forEach((col) => {
+                    const current = workingRows[i][col.key];
+                    if (current != null && current !== '') return;
+                    const prev = workingRows[i - 1][col.key];
+                    if (prev == null || prev === '') return;
+                    workingRows[i][col.key] = prev;
+                });
+            }
+            render();
+        };
+
+        modal.querySelector('#bulkCopyFirst').onclick = () => {
+            commitSnapshot();
+            if (workingRows.length === 0) return;
+            const first = workingRows[0];
+            for (let i = 1; i < workingRows.length; i++) {
+                colDefs.forEach((col) => {
+                    const current = workingRows[i][col.key];
+                    if (current != null && current !== '') return;
+                    const firstVal = first[col.key];
+                    if (firstVal == null || firstVal === '') return;
+                    workingRows[i][col.key] = firstVal;
+                });
+            }
+            render();
+        };
+
+        // Extra tool buttons
+        extraTools.forEach((tool, i) => {
+            const btn = modal.querySelector(`#bulkExtraTool${i}`);
+            if (btn) btn.onclick = () => tool.onClick(workingRows, render, commitSnapshot);
+        });
+
+        tbody.querySelectorAll('[data-delete-row]').forEach((btn) => {
+            btn.onclick = () => {
+                commitSnapshot();
+                const idx = parseInt(btn.getAttribute('data-delete-row'), 10);
+                const row = workingRows[idx];
+                if (row && row.id) deletedIds.push(row.id);
+                workingRows.splice(idx, 1);
+                if (workingRows.length === 0) workingRows.push(buildNewBulkRow(colDefs));
+                render();
+            };
+        });
+
+        table.addEventListener('paste', (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) return;
+            const td = target.closest('td[data-col-index]');
+            const tr = target.closest('tr[data-row-index]');
+            if (!td || !tr) return;
+            const startRow = parseInt(tr.getAttribute('data-row-index') || '-1', 10);
+            const startCol = parseInt(td.getAttribute('data-col-index') || '-1', 10);
+            if (startRow < 0 || startCol < 0) return;
+
+            const matrix = parseClipboardMatrix(event.clipboardData?.getData('text/plain') || '');
+            if (matrix.length === 0) return;
+
+            const singleCell = matrix.length === 1 && matrix[0].length === 1;
+            const maxRows = table.querySelectorAll('tbody tr').length;
+            if (!singleCell && matrix[0].length > tableColCount) return;
+
+            event.preventDefault();
+
+            let applied = 0;
+            let invalid = 0;
+            if (singleCell) {
+                const raw = matrix[0][0];
+                for (let r = startRow; r < maxRows; r++) {
+                    const input = table.querySelector(`tr[data-row-index="${r}"] td[data-col-index="${startCol}"] [data-col-key]`);
+                    if (!input) continue;
+                    const colKey = input.getAttribute('data-col-key');
+                    const col = colDefs.find(c => c.key === colKey);
+                    if (!col) continue;
+                    const normalized = normalizePastedValue(raw, col, input);
+                    if (!normalized.ok) {
+                        invalid++;
+                        markPasteInvalid(input);
+                        continue;
+                    }
+                    if (col.type === 'checkbox') input.checked = !!normalized.value;
+                    else input.value = normalized.value;
+                    applied++;
+                }
+            } else {
+                matrix.forEach((rowVals, rowOffset) => {
+                    const r = startRow + rowOffset;
+                    if (r >= maxRows) return;
+                    rowVals.forEach((raw, colOffset) => {
+                        const c = startCol + colOffset;
+                        if (c >= colDefs.length) return;
+                        const input = table.querySelector(`tr[data-row-index="${r}"] td[data-col-index="${c}"] [data-col-key]`);
+                        if (!input) return;
+                        const colKey = input.getAttribute('data-col-key');
+                        const col = colDefs.find(k => k.key === colKey);
+                        if (!col) return;
+                        const normalized = normalizePastedValue(raw, col, input);
+                        if (!normalized.ok) {
+                            invalid++;
+                            markPasteInvalid(input);
+                            return;
+                        }
+                        if (col.type === 'checkbox') input.checked = !!normalized.value;
+                        else input.value = normalized.value;
+                        applied++;
+                    });
+                });
+            }
+
+            if (invalid > 0) toast(`Pasted ${applied} value(s), ${invalid} invalid`, 'error');
+            else if (applied > 1) toast(`Pasted ${applied} value(s)`, 'success');
+        });
+
+        modal.querySelector('#bulkCancel').onclick = () => overlay.remove();
+        modal.querySelector('#bulkSave').onclick = async () => {
+            const saveBtn = modal.querySelector('#bulkSave');
+            const previousText = saveBtn.textContent;
+            saveBtn.textContent = 'Saving...';
+            saveBtn.disabled = true;
+            try {
+                commitSnapshot();
+                const finalRows = workingRows.filter(row => rowHasUserValue(row, colDefs));
+                await onSave({ rows: finalRows, deletedIds }, overlay);
+            } catch (err) {
+                toast('Error: ' + err.message, 'error');
+                saveBtn.textContent = previousText;
+                saveBtn.disabled = false;
+            }
+        };
+    }
+
+    render();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+    const firstInput = modal.querySelector('.bulk-input, .bulk-input-checkbox');
     if (firstInput) firstInput.focus();
     return overlay;
 }
@@ -558,17 +1204,18 @@ const PROPERTY_FIELDS = [
 ];
 
 function buildSuiteFields(marketProfiles, areaUnit, simplifyUnitAssumptions = false) {
-    const areaFieldLabel = areaUnit === 'unit' ? 'Unit Count' : 'Area (SF)';
+    const isUnit = areaUnit === 'unit';
+    const areaFieldLabel = isUnit ? 'Unit Count' : 'Area (SF)';
     const mlaOptions = [
         { value: '', label: '— Auto (match by space type) —' },
         ...(marketProfiles || []).map(m => ({ value: m.id, label: `${fmt.typeLabel(m.space_type)} — ${fmt.perSf(m.market_rent_per_unit, areaUnit)}` }))
     ];
     const fields = [
-        { key: 'suite_name', label: 'Suite Name', type: 'text', required: true },
+        { key: 'suite_name', label: isUnit ? 'Unit Type Name' : 'Suite Name', type: 'text', required: true },
         { key: 'area', label: areaFieldLabel, type: 'number', required: true, step: '1', half: true },
         {
             key: 'space_type',
-            label: 'Space Type',
+            label: isUnit ? 'Unit Type' : 'Space Type',
             type: 'text',
             required: true,
             half: true,
@@ -576,8 +1223,10 @@ function buildSuiteFields(marketProfiles, areaUnit, simplifyUnitAssumptions = fa
                 ? 'Unit type key used by rent roll assumptions (e.g., studio, 1br, climate_5x10).'
                 : 'e.g., office, retail, industrial'
         },
-        { key: 'floor', label: 'Floor', type: 'number', step: '1', half: true },
     ];
+    if (!simplifyUnitAssumptions) {
+        fields.push({ key: 'floor', label: 'Floor', type: 'number', step: '1', half: true });
+    }
     if (!simplifyUnitAssumptions) {
         fields.push({
             key: 'market_leasing_profile_id',
@@ -588,24 +1237,46 @@ function buildSuiteFields(marketProfiles, areaUnit, simplifyUnitAssumptions = fa
             helpText: 'Assign MLA for renewal/new-tenant modeling',
         });
     }
+    fields.push({ key: 'is_available', label: 'Available for leasing', type: 'checkbox', default: true });
     fields.push({ key: 'comment', label: 'Comment / Source Note', type: 'textarea' });
     return fields;
 }
 
-const TENANT_FIELDS = [
-    { key: 'name', label: 'Tenant Name', type: 'text', required: true },
-    { key: 'credit_rating', label: 'Credit Rating', type: 'text', half: true },
-    { key: 'industry', label: 'Industry', type: 'text', half: true },
-    { key: 'contact_name', label: 'Contact Name', type: 'text', half: true },
-    { key: 'contact_email', label: 'Contact Email', type: 'text', half: true },
-    { key: 'comment', label: 'Comment / Source Note', type: 'textarea' },
-];
+function buildTenantFields(propertyType = '') {
+    const isUnit = propertyType === 'multifamily' || propertyType === 'self_storage';
+    const fields = [
+        { key: 'name', label: isUnit ? 'Resident Name' : 'Tenant Name', type: 'text', required: true },
+    ];
+    if (!isUnit) {
+        fields.push({ key: 'credit_rating', label: 'Credit Rating', type: 'text', half: true });
+        fields.push({ key: 'industry', label: 'Industry', type: 'text', half: true });
+    }
+    fields.push({ key: 'contact_name', label: 'Contact Name', type: 'text', half: true });
+    fields.push({ key: 'contact_email', label: 'Contact Email', type: 'text', half: true });
+    fields.push({ key: 'comment', label: 'Comment / Source Note', type: 'textarea' });
+    return fields;
+}
+const TENANT_FIELDS = buildTenantFields();
+
+function buildUnitTypeFields(areaUnit = 'unit') {
+    return [
+        { key: 'suite_name', label: 'Unit Type Name', type: 'text', required: true, half: true, helpText: 'e.g., Studio, 1BR, 2BR, 5x10 Climate' },
+        { key: 'space_type', label: 'Unit Type Key', type: 'text', required: true, half: true, helpText: 'Used to link market assumptions (e.g., studio, 1br, climate_5x10)' },
+        { key: 'area', label: areaUnit === 'unit' ? 'Unit Count' : 'Area', type: 'number', required: true, step: '1', half: true },
+        { key: 'is_vacant', label: 'Vacant (no current lease)', type: 'checkbox', default: false, half: true },
+        { type: 'section', label: 'Current Lease' },
+        { key: 'resident_name', label: 'Resident Name', type: 'text', half: true, visibleWhen: v => !v.is_vacant, helpText: 'Optional — leave blank for unnamed occupancy' },
+        { key: 'base_rent_per_unit', label: 'Rent $/Unit/mo', type: 'number', required: true, step: '0.01', half: true, visibleWhen: v => !v.is_vacant },
+        { key: 'lease_start_date', label: 'Lease Start', type: 'date', required: true, half: true, visibleWhen: v => !v.is_vacant },
+        { key: 'lease_end_date', label: 'Lease End', type: 'date', required: true, half: true, visibleWhen: v => !v.is_vacant },
+    ];
+}
 
 const ESCALATION_TYPES = ['flat', 'pct_annual', 'cpi', 'fixed_step'];
 const RECOVERY_TYPES = ['nnn', 'full_service_gross', 'modified_gross', 'base_year_stop', 'none'];
 const LEASE_TYPES = ['in_place', 'market', 'month_to_month'];
 
-function buildLeaseFields(suites, tenants, onNewTenant, recoveryStructures, includeSuite = true, areaUnit = 'sf') {
+function buildLeaseFields(suites, tenants, onNewTenant, recoveryStructures, includeSuite = true, areaUnit = 'sf', propertyType = '') {
     const rsOptions = [
         { value: '', label: '— None —' },
         ...(recoveryStructures || []).map(rs => ({ value: rs.id, label: rs.name }))
@@ -627,33 +1298,34 @@ function buildLeaseFields(suites, tenants, onNewTenant, recoveryStructures, incl
         },
         { key: 'lease_start_date', label: 'Start Date', type: 'date', required: true, half: true },
         { key: 'lease_end_date', label: 'End Date', type: 'date', required: true, half: true },
-        { type: 'section', label: 'Escalation' },
+        { type: 'section', label: 'Escalation', collapsible: true, collapsedSummary: (v) => v.escalation_type ? fmt.typeLabel(v.escalation_type) : 'Flat' },
         { key: 'escalation_type', label: 'Escalation Type', type: 'select', options: ESCALATION_TYPES, default: 'flat', half: true },
         { key: 'escalation_pct_annual', label: 'Annual Escalation %', type: 'number', step: '0.0025', half: true, helpText: 'Enter percent, e.g. 3.00 = 3%', visibleWhen: v => v.escalation_type === 'pct_annual' },
         { key: 'cpi_floor', label: 'CPI Floor', type: 'number', step: '0.005', half: true, visibleWhen: v => v.escalation_type === 'cpi' },
         { key: 'cpi_cap', label: 'CPI Cap', type: 'number', step: '0.005', half: true, visibleWhen: v => v.escalation_type === 'cpi' },
-        { type: 'section', label: 'Recovery' },
+        { type: 'section', label: 'Recovery', collapsible: true, collapsedSummary: (v) => v.recovery_structure_id ? 'Template' : (v.recovery_type ? fmt.typeLabel(v.recovery_type) : 'NNN') },
         { key: 'recovery_structure_id', label: 'Recovery Structure', type: 'select', options: rsOptions, half: true, helpText: 'Assign a template or set recovery type manually below' },
         { key: 'recovery_type', label: 'Recovery Type', type: 'select', options: RECOVERY_TYPES, default: 'nnn', half: true, helpText: 'Fallback when no template assigned' },
         { key: 'pro_rata_share_pct', label: 'Pro Rata Share %', type: 'number', step: '0.01', half: true, helpText: 'Enter percent (0-100). Leave blank for auto.' },
         { key: 'base_year', label: 'Base Year', type: 'number', step: '1', half: true, visibleWhen: v => v.recovery_type === 'base_year_stop' },
         { key: 'base_year_stop_amount', label: 'Base Year Stop $', type: 'number', step: '0.01', half: true, visibleWhen: v => v.recovery_type === 'base_year_stop' },
         { key: 'expense_stop_per_sf', label: 'Expense Stop $/SF', type: 'number', step: '0.01', half: true, visibleWhen: v => v.recovery_type === 'modified_gross' },
-        { type: 'section', label: 'Percentage Rent' },
+        { type: 'section', label: 'Percentage Rent', collapsible: true, defaultCollapsed: true },
         { key: 'pct_rent_breakpoint', label: 'Breakpoint ($)', type: 'number', step: '0.01', half: true },
         { key: 'pct_rent_rate', label: 'Pct Rent Rate', type: 'number', step: '0.005', half: true, helpText: 'Enter percent, e.g. 6.00 = 6%' },
         { key: 'projected_annual_sales_per_sf', label: 'Projected Sales $/SF/yr', type: 'number', step: '0.01', half: true, visibleWhen: v => v.pct_rent_rate > 0 },
-        { type: 'section', label: 'Renewal' },
+        { type: 'section', label: 'Renewal', collapsible: true, defaultCollapsed: true, collapsedSummary: 'Uses market defaults if empty' },
         { key: 'renewal_probability', label: 'Renewal Probability', type: 'number', step: '0.05', half: true, helpText: 'Enter percent (0-100)' },
-        { key: 'renewal_rent_spread_pct', label: 'Renewal Rent Spread', type: 'number', step: '0.01', half: true, helpText: 'e.g. 5.00 = 5% above market' },
+        { key: 'renewal_rent_spread_pct', label: 'Renewal Rent Adjustment', type: 'number', step: '0.01', half: true, helpText: 'e.g. 5.00 = 5% above market, -5.00 = 5% below' },
     ];
     if (includeSuite) {
+        const unitSuffix = areaUnit === 'unit' ? ' Units' : ' SF';
         fields.unshift({
             key: 'suite_id',
-            label: 'Suite',
+            label: areaUnit === 'unit' ? 'Unit Type' : 'Suite',
             type: 'select',
             required: true,
-            options: suites.map(s => ({ value: s.id, label: `${s.suite_name} (${fmt.num(s.area)} SF)` })),
+            options: suites.map(s => ({ value: s.id, label: `${s.suite_name} (${fmt.num(s.area)}${unitSuffix})` })),
         });
     }
     fields.forEach((f) => {
@@ -670,30 +1342,85 @@ function buildLeaseFields(suites, tenants, onNewTenant, recoveryStructures, incl
             f.visibleWhen = (v) => !v.recovery_structure_id && v.recovery_type === 'modified_gross';
         }
     });
+
+    // Smart defaults by property type
+    const isMultifamily = propertyType === 'multifamily' || propertyType === 'self_storage';
+    const isRetail = propertyType === 'retail';
+    if (isMultifamily) {
+        // Hide commercial-only sections and fields
+        const hideKeys = new Set([
+            'recovery_structure_id', 'recovery_type', 'pro_rata_share_pct',
+            'base_year', 'base_year_stop_amount', 'expense_stop_per_sf',
+            'pct_rent_breakpoint', 'pct_rent_rate', 'projected_annual_sales_per_sf',
+            'rent_payment_frequency', 'renewal_probability', 'renewal_rent_spread_pct',
+        ]);
+        const hideSections = new Set(['Recovery', 'Percentage Rent', 'Escalation', 'Renewal']);
+        fields.forEach(f => {
+            if (f.type === 'section' && hideSections.has(f.label)) {
+                f.visibleWhen = () => false;
+            }
+            if (hideKeys.has(f.key)) {
+                f.visibleWhen = () => false;
+            }
+            // Hide escalation fields
+            if (['escalation_type', 'escalation_pct_annual', 'cpi_floor', 'cpi_cap'].includes(f.key)) {
+                f.visibleWhen = () => false;
+            }
+            // Default payment frequency to monthly for unit properties
+            if (f.key === 'rent_payment_frequency') {
+                f.default = 'monthly';
+            }
+            // Adjust base rent label
+            if (f.key === 'base_rent_per_unit') {
+                f.helpText = '$/unit/month';
+            }
+        });
+    } else if (!isRetail) {
+        // Office/industrial: hide percentage rent by default (keep section header collapsed)
+        fields.forEach(f => {
+            if (f.type === 'section' && f.label === 'Percentage Rent') {
+                f.defaultCollapsed = true;
+            }
+        });
+    }
+
     return fields;
 }
 
 const STANDARD_EXPENSE_CATEGORIES = ['real_estate_taxes', 'insurance', 'cam', 'utilities', 'management_fee', 'repairs_maintenance', 'general_admin', 'other'];
+const MULTIFAMILY_EXPENSE_CATEGORIES = ['real_estate_taxes', 'insurance', 'utilities', 'management_fee', 'repairs_maintenance', 'payroll', 'marketing', 'general_admin', 'contract_services', 'other'];
 
-const EXPENSE_FIELDS = [
-    {
-        key: 'category',
-        label: 'Category',
-        type: 'text',
-        required: true,
-        suggestions: STANDARD_EXPENSE_CATEGORIES,
-        helpText: 'Use a standard category or enter your own custom category.',
-    },
-    { key: 'description', label: 'Description', type: 'text' },
-    { key: 'comment', label: 'Comment / Source Note', type: 'textarea' },
-    { key: 'base_year_amount', label: 'Base Year Amount ($)', type: 'number', required: true, step: '0.01', half: true },
-    { key: 'growth_rate_pct', label: 'Annual Growth Rate', type: 'number', step: '0.005', default: 0.03, half: true, helpText: 'Enter percent, e.g. 3.00 = 3%' },
-    { key: 'is_recoverable', label: 'Recoverable from tenants', type: 'checkbox', default: true },
-    { key: 'is_gross_up_eligible', label: 'Gross-up eligible', type: 'checkbox', default: false },
-    { key: 'gross_up_vacancy_pct', label: 'Gross-Up Vacancy %', type: 'number', step: '0.01', half: true, helpText: 'Enter percent', visibleWhen: v => v.is_gross_up_eligible },
-    { key: 'is_pct_of_egi', label: '% of EGI (instead of fixed amount)', type: 'checkbox', default: false },
-    { key: 'pct_of_egi', label: 'Percentage of EGI', type: 'number', step: '0.005', half: true, helpText: 'Enter percent, e.g. 4.00 = 4%', visibleWhen: v => v.is_pct_of_egi },
-];
+function buildExpenseFields(propertyType) {
+    const isMultifamily = propertyType === 'multifamily' || propertyType === 'self_storage';
+    const categories = isMultifamily ? MULTIFAMILY_EXPENSE_CATEGORIES : STANDARD_EXPENSE_CATEGORIES;
+    const fields = [
+        {
+            key: 'category',
+            label: 'Category',
+            type: 'text',
+            required: true,
+            suggestions: categories,
+            helpText: 'Use a standard category or enter your own custom category.',
+        },
+        { key: 'description', label: 'Description', type: 'text' },
+        { key: 'comment', label: 'Comment / Source Note', type: 'textarea' },
+        { key: 'base_year_amount', label: 'Base Year Amount ($)', type: 'number', required: true, step: '0.01', half: true, visibleWhen: v => !v.is_pct_of_egi },
+        { key: 'growth_rate_pct', label: 'Annual Growth Rate', type: 'number', step: '0.005', default: 0.03, half: true, helpText: 'Enter percent, e.g. 3.00 = 3%', visibleWhen: v => !v.is_pct_of_egi },
+    ];
+    if (!isMultifamily) {
+        fields.push(
+            { key: 'is_recoverable', label: 'Recoverable from tenants', type: 'checkbox', default: true },
+            { key: 'is_gross_up_eligible', label: 'Gross-up eligible', type: 'checkbox', default: false },
+            { key: 'gross_up_vacancy_pct', label: 'Gross-Up Vacancy %', type: 'number', step: '0.01', half: true, helpText: 'Enter percent', visibleWhen: v => v.is_gross_up_eligible },
+        );
+    }
+    fields.push(
+        { key: 'is_pct_of_egi', label: '% of EGI (instead of fixed amount)', type: 'checkbox', default: false },
+        { key: 'pct_of_egi', label: 'Percentage of EGI', type: 'number', step: '0.005', half: true, helpText: 'Enter percent, e.g. 4.00 = 4%', visibleWhen: v => v.is_pct_of_egi },
+    );
+    return fields;
+}
+const EXPENSE_FIELDS = buildExpenseFields();
 
 const OTHER_INCOME_FIELDS = [
     { key: 'category', label: 'Category', type: 'text', required: true, helpText: 'e.g., parking, signage, telecom, laundry' },
@@ -727,6 +1454,11 @@ const MARKET_FIELDS = [
     { key: 'credit_loss_pct', label: 'Credit Loss %', type: 'number', step: '0.005', default: 0.01, half: true, helpText: 'Enter percent' },
 ];
 
+const CONCESSION_TIMING_OPTIONS = [
+    { value: 'blended', label: 'Blended' },
+    { value: 'timed', label: 'Timed by Year' },
+];
+
 function buildMarketFields(areaUnit, includeSpaceType = true) {
     const isUnit = areaUnit === 'unit';
     if (!isUnit) {
@@ -742,6 +1474,42 @@ function buildMarketFields(areaUnit, includeSpaceType = true) {
         { key: 'general_vacancy_pct', label: 'General Vacancy %', type: 'number', step: '0.005', default: 0.05, half: true, helpText: 'Enter percent' },
         { key: 'credit_loss_pct', label: 'Credit Loss %', type: 'number', step: '0.005', default: 0.01, half: true, helpText: 'Enter percent' },
         { key: 'renewal_probability', label: 'Renewal Probability', type: 'number', step: '0.05', default: 0.65, half: true, helpText: 'Used as annual turnover proxy (1 - renewal)' },
+        { key: 'new_tenant_free_rent_months', label: 'New Lease Concession (months)', type: 'number', step: '1', default: 0, half: true, helpText: 'Expected months free on turnover leases' },
+        { key: 'renewal_free_rent_months', label: 'Renewal Concession (months)', type: 'number', step: '1', default: 0, half: true, helpText: 'Expected months free on renewal leases' },
+        { key: 'concession_timing_mode', label: 'Concession Timing', type: 'select', options: CONCESSION_TIMING_OPTIONS, default: 'blended', half: true },
+        {
+            type: 'custom',
+            key: '_concession_timing_table',
+            visibleWhen: v => v.concession_timing_mode === 'timed',
+            render: (container, vals, setValue) => {
+                const yearKeys = [
+                    { key: 'concession_year1_months', label: 'Year 1' },
+                    { key: 'concession_year2_months', label: 'Year 2' },
+                    { key: 'concession_year3_months', label: 'Year 3' },
+                    { key: 'concession_year4_months', label: 'Year 4' },
+                    { key: 'concession_year5_months', label: 'Year 5' },
+                    { key: 'concession_stabilized_months', label: 'Year 6+' },
+                ];
+                container.className = 'concession-timing-table';
+                container.innerHTML = `
+                    <div class="form-label" style="margin-bottom:8px">Concession Schedule (months free per year)</div>
+                    <div class="concession-grid">
+                        ${yearKeys.map(yk => `
+                            <div class="concession-cell">
+                                <label class="concession-cell-label">${yk.label}</label>
+                                <input type="number" step="0.25" min="0" max="12" class="form-input concession-cell-input" data-ck="${yk.key}"
+                                    value="${vals[yk.key] != null ? vals[yk.key] : ''}" placeholder="0">
+                            </div>
+                        `).join('')}
+                    </div>`;
+                yearKeys.forEach(yk => {
+                    const inp = container.querySelector(`[data-ck="${yk.key}"]`);
+                    const initVal = vals[yk.key] != null ? String(vals[yk.key]) : '';
+                    setValue(yk.key, initVal);
+                    inp.addEventListener('input', () => setValue(yk.key, inp.value));
+                });
+            },
+        },
         { key: 'new_tenant_ti_per_sf', label: 'Turnover Cost ($/Unit/turn)', type: 'number', step: '0.01', default: 0, half: true, helpText: 'Used in occupancy model as turnover cost per turn' },
     ];
     if (!includeSpaceType) return unitFields;
@@ -749,6 +1517,239 @@ function buildMarketFields(areaUnit, includeSpaceType = true) {
         { key: 'space_type', label: 'Unit Type', type: 'text', required: true, helpText: 'Must match suite space type (e.g., studio, 1br, climate_5x10)' },
         ...unitFields,
     ];
+}
+
+function buildPayloadFromBulkRow(row, columns) {
+    const payload = {};
+    (columns || []).forEach((col) => {
+        if (!col || !col.key) return;
+        if (col.type === 'checkbox') {
+            payload[col.key] = !!row[col.key];
+            return;
+        }
+        const v = row[col.key];
+        if (v == null || v === '') return;
+        payload[col.key] = v;
+    });
+    return payload;
+}
+
+function summarizeBulkFailures(results) {
+    const failed = results.filter(r => r.status === 'rejected');
+    if (failed.length === 0) return null;
+    return failed[0].reason?.message || 'Unknown error';
+}
+
+function defaultMarketProfileValues(areaUnit) {
+    const common = {
+        market_rent_per_unit: null,
+        rent_growth_rate_pct: 0.03,
+        new_lease_term_months: 60,
+        new_tenant_ti_per_sf: 0,
+        new_tenant_lc_pct: 0.06,
+        new_tenant_free_rent_months: 0,
+        downtime_months: areaUnit === 'unit' ? 1 : 3,
+        renewal_probability: areaUnit === 'unit' ? 0.70 : 0.65,
+        renewal_lease_term_months: 60,
+        renewal_ti_per_sf: 0,
+        renewal_lc_pct: 0.03,
+        renewal_free_rent_months: 0,
+        renewal_rent_adjustment_pct: 0,
+        general_vacancy_pct: 0.05,
+        credit_loss_pct: 0.01,
+        concession_timing_mode: 'blended',
+        concession_year1_months: null,
+        concession_year2_months: null,
+        concession_year3_months: null,
+        concession_year4_months: null,
+        concession_year5_months: null,
+        concession_stabilized_months: null,
+        comment: null,
+        description: null,
+    };
+    return common;
+}
+
+function openMarketAssumptionWorkspace(propertyId, property, marketProfiles) {
+    const areaUnit = property.area_unit || 'sf';
+    const isUnit = areaUnit === 'unit';
+    const defaults = defaultMarketProfileValues(areaUnit);
+    const suiteTypes = [...new Set((property.suites || []).map((s) => s.space_type).filter(Boolean))];
+    const byType = {};
+    (marketProfiles || []).forEach((p) => { byType[p.space_type] = p; });
+
+    const rows = [];
+    suiteTypes.forEach((spaceType) => {
+        const existing = byType[spaceType];
+        if (existing) rows.push({ ...defaults, ...existing, id: existing.id, space_type: existing.space_type });
+        else rows.push({ ...defaults, id: null, space_type: spaceType });
+    });
+    (marketProfiles || []).forEach((p) => {
+        if (suiteTypes.includes(p.space_type)) return;
+        rows.push({ ...defaults, ...p, id: p.id, space_type: p.space_type });
+    });
+    if (rows.length === 0) rows.push({ ...defaults, id: null, space_type: '' });
+
+    const columns = [
+        { key: 'space_type', label: isUnit ? 'Unit Type' : 'Space Type', type: 'text', required: true, cloneOnAdd: false },
+        { key: 'market_rent_per_unit', label: isUnit ? 'Mkt Rent $/Unit/mo' : 'Mkt Rent $/SF/yr', type: 'number', step: '0.01', align: 'right' },
+        { key: 'rent_growth_rate_pct', label: 'Growth %', type: 'number', step: '0.005', asPercent: true, align: 'right', default: 0.03 },
+        { key: 'general_vacancy_pct', label: 'Vacancy %', type: 'number', step: '0.005', asPercent: true, align: 'right', default: 0.05 },
+        { key: 'credit_loss_pct', label: 'Credit %', type: 'number', step: '0.005', asPercent: true, align: 'right', default: 0.01 },
+        { key: 'renewal_probability', label: 'Renewal %', type: 'number', step: '0.01', asPercent: true, align: 'right', default: isUnit ? 0.70 : 0.65 },
+        { key: 'new_tenant_ti_per_sf', label: isUnit ? 'Turnover $/Unit' : 'New TI $/SF', type: 'number', step: '0.01', align: 'right', default: 0 },
+        { key: 'new_tenant_free_rent_months', label: 'New Concession (mo)', type: 'number', step: '0.25', align: 'right', default: 0 },
+        { key: 'renewal_free_rent_months', label: 'Renewal Concession (mo)', type: 'number', step: '0.25', align: 'right', default: 0 },
+        { key: 'concession_timing_mode', label: 'Concession Timing', type: 'select', options: CONCESSION_TIMING_OPTIONS, default: 'blended' },
+        { key: 'comment', label: 'Comment', type: 'text', cloneOnAdd: false },
+    ];
+
+    showBulkTableEditorModal({
+        title: 'Assumption Workspace',
+        columns,
+        rows,
+        addLabel: isUnit ? 'Add Unit Type' : 'Add Space Type',
+        intro: 'Spreadsheet-style assumptions editor. Paste ranges directly from Excel/Sheets; use fill-down tools to minimize clicks.',
+        onSave: async ({ rows: finalRows, deletedIds }, overlay) => {
+            const validationError = finalRows.find((r) => !r.space_type || String(r.space_type).trim() === '');
+            if (validationError) throw new Error('Each row needs a space/unit type.');
+            const missingRent = finalRows.find((r) => !r.id && (r.market_rent_per_unit == null || r.market_rent_per_unit === ''));
+            if (missingRent) throw new Error('New market profile rows require market rent.');
+
+            const uniqueDeletedIds = Array.from(new Set(deletedIds || []));
+            const deleteOps = uniqueDeletedIds.map((id) => api.del(`/properties/${propertyId}/market-profiles/${id}`));
+            const upsertOps = finalRows.map((row) => {
+                const payload = buildPayloadFromBulkRow(row, columns);
+                const spaceType = String(payload.space_type || '').trim();
+                delete payload.space_type;
+                if (row.id) {
+                    return api.put(`/properties/${propertyId}/market-profiles/${row.id}`, payload);
+                }
+                const createBody = { ...defaults, ...payload, space_type: spaceType };
+                return api.post(`/properties/${propertyId}/market-profiles`, createBody);
+            });
+
+            const results = await Promise.allSettled([...deleteOps, ...upsertOps]);
+            const firstFailure = summarizeBulkFailures(results);
+            if (firstFailure) throw new Error(firstFailure);
+
+            overlay.remove();
+            toast('Market assumptions updated', 'success');
+            propertyView({ id: propertyId });
+        },
+    });
+}
+
+function openExpenseWorkspace(propertyId, expenses, propertyType) {
+    const isMultifamily = propertyType === 'multifamily' || propertyType === 'self_storage';
+    const defaults = {
+        category: '',
+        description: null,
+        comment: null,
+        base_year_amount: 0,
+        growth_rate_pct: 0.03,
+        is_recoverable: !isMultifamily,
+        is_pct_of_egi: false,
+        pct_of_egi: null,
+        is_gross_up_eligible: false,
+        gross_up_vacancy_pct: null,
+    };
+    const rows = (expenses || []).map((e) => ({ ...defaults, ...e, id: e.id }));
+    if (rows.length === 0) rows.push({ ...defaults, id: null });
+    const columns = [
+        { key: 'category', label: 'Category', type: 'text', required: true, default: '' },
+        { key: 'description', label: 'Description', type: 'text', cloneOnAdd: false },
+        { key: 'base_year_amount', label: 'Base Amount $', type: 'number', step: '0.01', align: 'right', default: 0 },
+        { key: 'growth_rate_pct', label: 'Growth %', type: 'number', step: '0.005', asPercent: true, align: 'right', default: 0.03 },
+        ...(!isMultifamily ? [{ key: 'is_recoverable', label: 'Recoverable', type: 'checkbox', default: true }] : []),
+        { key: 'is_pct_of_egi', label: '% EGI', type: 'checkbox', default: false },
+        { key: 'pct_of_egi', label: 'Pct of EGI %', type: 'number', step: '0.005', asPercent: true, align: 'right' },
+        { key: 'comment', label: 'Comment', type: 'text', cloneOnAdd: false },
+    ];
+    showBulkTableEditorModal({
+        title: 'Expense Workspace',
+        columns,
+        rows,
+        intro: 'Edit all operating expenses in one pass. Add rows from the previous row pattern and paste multi-cell ranges.',
+        extraTools: [
+            {
+                label: 'Set All Growth Rates',
+                onClick: (workingRows, rerender, commitSnapshot) => {
+                    const rate = prompt('Enter growth rate % to apply to all expenses (e.g. 3 for 3%):');
+                    if (rate == null || rate.trim() === '') return;
+                    const n = parseFloat(rate);
+                    if (isNaN(n)) { toast('Invalid number', 'error'); return; }
+                    commitSnapshot();
+                    workingRows.forEach(r => { r.growth_rate_pct = n / 100; });
+                    rerender();
+                    toast(`Set all growth rates to ${n}%`, 'success');
+                }
+            }
+        ],
+        onSave: async ({ rows: finalRows, deletedIds }, overlay) => {
+            const invalid = finalRows.find((r) => !r.category || String(r.category).trim() === '');
+            if (invalid) throw new Error('Each expense row needs a category.');
+
+            const uniqueDeletedIds = Array.from(new Set(deletedIds || []));
+            const deleteOps = uniqueDeletedIds.map((id) => api.del(`/properties/${propertyId}/expenses/${id}`));
+            const upsertOps = finalRows.map((row) => {
+                const payload = buildPayloadFromBulkRow(row, columns);
+                if (row.id) return api.put(`/properties/${propertyId}/expenses/${row.id}`, payload);
+                return api.post(`/properties/${propertyId}/expenses`, { ...defaults, ...payload, category: String(payload.category || '').trim() });
+            });
+            const results = await Promise.allSettled([...deleteOps, ...upsertOps]);
+            const firstFailure = summarizeBulkFailures(results);
+            if (firstFailure) throw new Error(firstFailure);
+
+            overlay.remove();
+            toast('Expenses updated', 'success');
+            propertyView({ id: propertyId });
+        },
+    });
+}
+
+function openOtherIncomeWorkspace(propertyId, items) {
+    const defaults = {
+        category: '',
+        description: null,
+        comment: null,
+        base_year_amount: 0,
+        growth_rate_pct: 0.03,
+    };
+    const rows = (items || []).map((i) => ({ ...defaults, ...i, id: i.id }));
+    if (rows.length === 0) rows.push({ ...defaults, id: null });
+    const columns = [
+        { key: 'category', label: 'Category', type: 'text', required: true, default: '' },
+        { key: 'description', label: 'Description', type: 'text', cloneOnAdd: false },
+        { key: 'base_year_amount', label: 'Base Amount $', type: 'number', step: '0.01', align: 'right', default: 0 },
+        { key: 'growth_rate_pct', label: 'Growth %', type: 'number', step: '0.005', asPercent: true, align: 'right', default: 0.03 },
+        { key: 'comment', label: 'Comment', type: 'text', cloneOnAdd: false },
+    ];
+    showBulkTableEditorModal({
+        title: 'Other Income Workspace',
+        columns,
+        rows,
+        intro: 'Manage all custom revenue lines together with low-click bulk editing and paste support.',
+        onSave: async ({ rows: finalRows, deletedIds }, overlay) => {
+            const invalid = finalRows.find((r) => !r.category || String(r.category).trim() === '');
+            if (invalid) throw new Error('Each revenue row needs a category.');
+
+            const uniqueDeletedIds = Array.from(new Set(deletedIds || []));
+            const deleteOps = uniqueDeletedIds.map((id) => api.del(`/properties/${propertyId}/other-income/${id}`));
+            const upsertOps = finalRows.map((row) => {
+                const payload = buildPayloadFromBulkRow(row, columns);
+                if (row.id) return api.put(`/properties/${propertyId}/other-income/${row.id}`, payload);
+                return api.post(`/properties/${propertyId}/other-income`, { ...defaults, ...payload, category: String(payload.category || '').trim() });
+            });
+            const results = await Promise.allSettled([...deleteOps, ...upsertOps]);
+            const firstFailure = summarizeBulkFailures(results);
+            if (firstFailure) throw new Error(firstFailure);
+
+            overlay.remove();
+            toast('Other income updated', 'success');
+            propertyView({ id: propertyId });
+        },
+    });
 }
 
 function openUnitMarketQuickSetup(propertyId, property, marketProfiles) {
@@ -767,6 +1768,41 @@ function openUnitMarketQuickSetup(propertyId, property, marketProfiles) {
         { key: 'same_vacancy', label: 'Vacancy % (all types)', type: 'number', step: '0.005', default: 0.05, half: true, helpText: 'Enter percent', visibleWhen: v => v.apply_same_all },
         { key: 'same_credit', label: 'Credit Loss % (all types)', type: 'number', step: '0.005', default: 0.01, half: true, helpText: 'Enter percent', visibleWhen: v => v.apply_same_all },
         { key: 'same_renewal', label: 'Renewal Prob (all types)', type: 'number', step: '0.05', default: 0.65, half: true, helpText: 'Used as turnover proxy', visibleWhen: v => v.apply_same_all },
+        { key: 'same_new_concession', label: 'New Lease Concession (mo, all types)', type: 'number', step: '1', default: 0, half: true, visibleWhen: v => v.apply_same_all },
+        { key: 'same_renewal_concession', label: 'Renewal Concession (mo, all types)', type: 'number', step: '1', default: 0, half: true, visibleWhen: v => v.apply_same_all },
+        { key: 'same_concession_timing_mode', label: 'Concession Timing (all types)', type: 'select', options: CONCESSION_TIMING_OPTIONS, default: 'blended', half: true, visibleWhen: v => v.apply_same_all },
+        {
+            type: 'custom',
+            key: '_same_concession_table',
+            visibleWhen: v => v.apply_same_all && v.same_concession_timing_mode === 'timed',
+            render: (container, vals, setValue) => {
+                const yearKeys = [
+                    { key: 'same_concession_year1_months', label: 'Year 1' },
+                    { key: 'same_concession_year2_months', label: 'Year 2' },
+                    { key: 'same_concession_year3_months', label: 'Year 3' },
+                    { key: 'same_concession_year4_months', label: 'Year 4' },
+                    { key: 'same_concession_year5_months', label: 'Year 5' },
+                    { key: 'same_concession_stabilized_months', label: 'Year 6+' },
+                ];
+                container.className = 'concession-timing-table';
+                container.innerHTML = `
+                    <div class="form-label" style="margin-bottom:8px">Concession Schedule — all types (months free)</div>
+                    <div class="concession-grid">
+                        ${yearKeys.map(yk => `
+                            <div class="concession-cell">
+                                <label class="concession-cell-label">${yk.label}</label>
+                                <input type="number" step="0.25" min="0" max="12" class="form-input concession-cell-input" data-ck="${yk.key}"
+                                    value="${vals[yk.key] != null ? vals[yk.key] : ''}" placeholder="0">
+                            </div>
+                        `).join('')}
+                    </div>`;
+                yearKeys.forEach(yk => {
+                    const inp = container.querySelector(`[data-ck="${yk.key}"]`);
+                    setValue(yk.key, vals[yk.key] != null ? String(vals[yk.key]) : '');
+                    inp.addEventListener('input', () => setValue(yk.key, inp.value));
+                });
+            },
+        },
         { key: 'same_turnover', label: 'Turnover Cost ($/Unit, all types)', type: 'number', step: '0.01', default: 0, half: true, visibleWhen: v => v.apply_same_all },
         { key: 'same_comment', label: 'Comment / Source Note (all types)', type: 'textarea', visibleWhen: v => v.apply_same_all },
     ];
@@ -838,6 +1874,87 @@ function openUnitMarketQuickSetup(propertyId, property, marketProfiles) {
             visibleWhen: v => !v.apply_same_all,
         });
         fields.push({
+            key: `new_concession_${st}`,
+            label: 'New Lease Concession (months)',
+            type: 'number',
+            step: '1',
+            half: true,
+            default: mla ? parseFloat(mla.new_tenant_free_rent_months || 0) : 0,
+            visibleWhen: v => !v.apply_same_all,
+        });
+        fields.push({
+            key: `renewal_concession_${st}`,
+            label: 'Renewal Concession (months)',
+            type: 'number',
+            step: '1',
+            half: true,
+            default: mla ? parseFloat(mla.renewal_free_rent_months || 0) : 0,
+            visibleWhen: v => !v.apply_same_all,
+        });
+        fields.push({
+            key: `timing_mode_${st}`,
+            label: 'Concession Timing',
+            type: 'select',
+            options: CONCESSION_TIMING_OPTIONS,
+            half: true,
+            default: mla ? (mla.concession_timing_mode || 'blended') : 'blended',
+            visibleWhen: v => !v.apply_same_all,
+        });
+        fields.push({
+            key: `c_y1_${st}`,
+            label: 'Year 1 Concession (months)',
+            type: 'number',
+            step: '0.25',
+            half: true,
+            default: mla && mla.concession_year1_months != null ? parseFloat(mla.concession_year1_months) : '',
+            visibleWhen: v => !v.apply_same_all && v[`timing_mode_${st}`] === 'timed',
+        });
+        fields.push({
+            key: `c_y2_${st}`,
+            label: 'Year 2 Concession (months)',
+            type: 'number',
+            step: '0.25',
+            half: true,
+            default: mla && mla.concession_year2_months != null ? parseFloat(mla.concession_year2_months) : '',
+            visibleWhen: v => !v.apply_same_all && v[`timing_mode_${st}`] === 'timed',
+        });
+        fields.push({
+            key: `c_y3_${st}`,
+            label: 'Year 3 Concession (months)',
+            type: 'number',
+            step: '0.25',
+            half: true,
+            default: mla && mla.concession_year3_months != null ? parseFloat(mla.concession_year3_months) : '',
+            visibleWhen: v => !v.apply_same_all && v[`timing_mode_${st}`] === 'timed',
+        });
+        fields.push({
+            key: `c_y4_${st}`,
+            label: 'Year 4 Concession (months)',
+            type: 'number',
+            step: '0.25',
+            half: true,
+            default: mla && mla.concession_year4_months != null ? parseFloat(mla.concession_year4_months) : '',
+            visibleWhen: v => !v.apply_same_all && v[`timing_mode_${st}`] === 'timed',
+        });
+        fields.push({
+            key: `c_y5_${st}`,
+            label: 'Year 5 Concession (months)',
+            type: 'number',
+            step: '0.25',
+            half: true,
+            default: mla && mla.concession_year5_months != null ? parseFloat(mla.concession_year5_months) : '',
+            visibleWhen: v => !v.apply_same_all && v[`timing_mode_${st}`] === 'timed',
+        });
+        fields.push({
+            key: `c_ys_${st}`,
+            label: 'Year 6+ Concession (months)',
+            type: 'number',
+            step: '0.25',
+            half: true,
+            default: mla && mla.concession_stabilized_months != null ? parseFloat(mla.concession_stabilized_months) : '',
+            visibleWhen: v => !v.apply_same_all && v[`timing_mode_${st}`] === 'timed',
+        });
+        fields.push({
             key: `comment_${st}`,
             label: 'Comment / Source Note',
             type: 'textarea',
@@ -873,6 +1990,35 @@ function openUnitMarketQuickSetup(propertyId, property, marketProfiles) {
                 const turnover = sharedMode
                     ? (data.same_turnover ?? parseFloat(existing?.new_tenant_ti_per_sf ?? 0))
                     : (data[`turnover_${st}`] ?? parseFloat(existing?.new_tenant_ti_per_sf ?? 0));
+                const newConcessionMonthsRaw = sharedMode
+                    ? (data.same_new_concession ?? parseFloat(existing?.new_tenant_free_rent_months ?? 0))
+                    : (data[`new_concession_${st}`] ?? parseFloat(existing?.new_tenant_free_rent_months ?? 0));
+                const renewalConcessionMonthsRaw = sharedMode
+                    ? (data.same_renewal_concession ?? parseFloat(existing?.renewal_free_rent_months ?? 0))
+                    : (data[`renewal_concession_${st}`] ?? parseFloat(existing?.renewal_free_rent_months ?? 0));
+                const newConcessionMonths = Math.max(0, Math.round(Number(newConcessionMonthsRaw || 0)));
+                const renewalConcessionMonths = Math.max(0, Math.round(Number(renewalConcessionMonthsRaw || 0)));
+                const concessionTimingMode = sharedMode
+                    ? (data.same_concession_timing_mode || existing?.concession_timing_mode || 'blended')
+                    : (data[`timing_mode_${st}`] || existing?.concession_timing_mode || 'blended');
+                const concessionYear1Months = sharedMode
+                    ? (data.same_concession_year1_months ?? existing?.concession_year1_months ?? null)
+                    : (data[`c_y1_${st}`] ?? existing?.concession_year1_months ?? null);
+                const concessionYear2Months = sharedMode
+                    ? (data.same_concession_year2_months ?? existing?.concession_year2_months ?? null)
+                    : (data[`c_y2_${st}`] ?? existing?.concession_year2_months ?? null);
+                const concessionYear3Months = sharedMode
+                    ? (data.same_concession_year3_months ?? existing?.concession_year3_months ?? null)
+                    : (data[`c_y3_${st}`] ?? existing?.concession_year3_months ?? null);
+                const concessionYear4Months = sharedMode
+                    ? (data.same_concession_year4_months ?? existing?.concession_year4_months ?? null)
+                    : (data[`c_y4_${st}`] ?? existing?.concession_year4_months ?? null);
+                const concessionYear5Months = sharedMode
+                    ? (data.same_concession_year5_months ?? existing?.concession_year5_months ?? null)
+                    : (data[`c_y5_${st}`] ?? existing?.concession_year5_months ?? null);
+                const concessionStabilizedMonths = sharedMode
+                    ? (data.same_concession_stabilized_months ?? existing?.concession_stabilized_months ?? null)
+                    : (data[`c_ys_${st}`] ?? existing?.concession_stabilized_months ?? null);
                 const comment = sharedMode
                     ? (data.same_comment ?? existing?.comment ?? null)
                     : (data[`comment_${st}`] ?? existing?.comment ?? null);
@@ -883,6 +2029,15 @@ function openUnitMarketQuickSetup(propertyId, property, marketProfiles) {
                     credit_loss_pct: credit,
                     renewal_probability: renewal,
                     new_tenant_ti_per_sf: turnover,
+                    new_tenant_free_rent_months: newConcessionMonths,
+                    renewal_free_rent_months: renewalConcessionMonths,
+                    concession_timing_mode: concessionTimingMode,
+                    concession_year1_months: concessionYear1Months,
+                    concession_year2_months: concessionYear2Months,
+                    concession_year3_months: concessionYear3Months,
+                    concession_year4_months: concessionYear4Months,
+                    concession_year5_months: concessionYear5Months,
+                    concession_stabilized_months: concessionStabilizedMonths,
                     comment,
                 };
                 if (existing) {
@@ -928,16 +2083,57 @@ function openUnitInPlaceRentEditor(propertyId, allLeases) {
         title: 'Edit In-Place Rent/Unit',
         fields,
         wide: true,
+        smartPaste: true,
         onSubmit: async (data, overlay) => {
-            for (const l of leases) {
-                const key = `rent_${l.id}`;
-                if (!(key in data)) continue;
-                const nextRent = data[key];
-                if (nextRent == null || nextRent === '') continue;
-                const current = parseFloat(l.base_rent_per_unit);
-                if (Math.abs(nextRent - current) < 1e-9) continue;
-                await api.put(`/leases/${l.id}`, { base_rent_per_unit: nextRent });
+            const updates = leases
+                .map((l) => {
+                    const key = `rent_${l.id}`;
+                    if (!(key in data)) return null;
+                    const nextRent = data[key];
+                    if (nextRent == null || nextRent === '') return null;
+                    const current = parseFloat(l.base_rent_per_unit);
+                    if (Math.abs(nextRent - current) < 1e-9) return null;
+                    return { leaseId: l.id, base_rent_per_unit: nextRent };
+                })
+                .filter(Boolean);
+
+            if (updates.length === 0) {
+                overlay.remove();
+                toast('No rent changes to save', 'info');
+                return;
             }
+
+            let failedCount = 0;
+            let firstError = '';
+            try {
+                const result = await api.patch('/leases/bulk', {
+                    atomic: false,
+                    updates: updates.map((u) => ({
+                        lease_id: u.leaseId,
+                        fields: { base_rent_per_unit: u.base_rent_per_unit },
+                    })),
+                });
+                failedCount = (result?.failed || []).length;
+                if (failedCount > 0) {
+                    const firstFailure = result.failed[0];
+                    firstError = firstFailure?.detail || 'Unknown error';
+                }
+            } catch (err) {
+                // Fallback for older backends without the bulk endpoint.
+                const fallback = await Promise.allSettled(
+                    updates.map((u) => api.put(`/leases/${u.leaseId}`, { base_rent_per_unit: u.base_rent_per_unit }))
+                );
+                const failed = fallback.filter(r => r.status === 'rejected');
+                failedCount = failed.length;
+                if (failedCount > 0) {
+                    firstError = failed[0].reason?.message || err.message || 'Unknown error';
+                }
+            }
+
+            if (failedCount > 0) {
+                throw new Error(`Saved ${updates.length - failedCount}/${updates.length}. ${failedCount} failed (${firstError}).`);
+            }
+
             overlay.remove();
             toast('In-place rents updated', 'success');
             propertyView({ id: propertyId });
@@ -945,7 +2141,10 @@ function openUnitInPlaceRentEditor(propertyId, allLeases) {
     });
 }
 
-const VALUATION_FIELDS = [
+function buildValuationFields(propertyType = '') {
+    const isUnit = propertyType === 'multifamily' || propertyType === 'self_storage';
+    const reservesLabel = isUnit ? 'Capital Reserves $/Unit/yr' : 'Capital Reserves $/SF/yr';
+    const fields = [
     { key: 'name', label: 'Valuation Name', type: 'text', required: true },
     { key: 'description', label: 'Description', type: 'text' },
     { key: 'comment', label: 'Comment / Source Note', type: 'textarea' },
@@ -985,27 +2184,32 @@ const VALUATION_FIELDS = [
         helpText: 'Used when preset is Custom Flat Rate.',
         visibleWhen: v => v.transfer_tax_preset === 'custom_rate',
     },
-    { key: 'capital_reserves_per_unit', label: 'Capital Reserves $/SF/yr', type: 'number', step: '0.05', default: 0.25, half: true },
+    { key: 'capital_reserves_per_unit', label: reservesLabel, type: 'number', step: '0.05', default: 0.25, half: true },
     { key: 'exit_cap_applied_to_year', label: 'Exit Cap Applied to Year', type: 'number', step: '1', default: -1, half: true, helpText: '-1 = forward year (Hold + 1 NOI)' },
     { key: 'use_mid_year_convention', label: 'Use mid-year discounting', type: 'checkbox', default: false },
-    { key: 'apply_stabilized_gross_up', label: 'Apply stabilized gross-up', type: 'checkbox', default: true },
-    {
-        key: 'stabilized_occupancy_pct',
-        label: 'Stabilized Occupancy %',
-        type: 'number',
-        step: '0.005',
-        default: 0.95,
-        half: true,
-        helpText: 'Optional global gross-up target. Leave blank to use each expense line target.',
-        visibleWhen: v => v.apply_stabilized_gross_up,
-    },
-    { type: 'section', label: 'Debt (optional)' },
-    { key: 'loan_amount', label: 'Loan Amount ($)', type: 'number', step: '1', half: true },
-    { key: 'interest_rate', label: 'Interest Rate', type: 'number', step: '0.0025', half: true, helpText: 'Enter percent' },
-    { key: 'amortization_months', label: 'Amortization (months)', type: 'number', step: '1', half: true },
-    { key: 'loan_term_months', label: 'Loan Term (months)', type: 'number', step: '1', half: true },
-    { key: 'io_period_months', label: 'Interest-Only Period (months)', type: 'number', step: '1', default: 0, half: true },
-];
+    ];
+    if (!isUnit) {
+        fields.push({ key: 'apply_stabilized_gross_up', label: 'Apply stabilized gross-up', type: 'checkbox', default: true });
+        fields.push({
+            key: 'stabilized_occupancy_pct',
+            label: 'Stabilized Occupancy %',
+            type: 'number',
+            step: '0.005',
+            default: 0.95,
+            half: true,
+            helpText: 'Optional global gross-up target. Leave blank to use each expense line target.',
+            visibleWhen: v => v.apply_stabilized_gross_up,
+        });
+    }
+    fields.push({ type: 'section', label: 'Financing', collapsible: true, defaultCollapsed: true });
+    fields.push({ key: 'loan_amount', label: 'Loan Amount ($)', type: 'number', step: '1', half: true });
+    fields.push({ key: 'interest_rate', label: 'Interest Rate', type: 'number', step: '0.0025', half: true, helpText: 'Enter percent' });
+    fields.push({ key: 'amortization_months', label: 'Amortization (months)', type: 'number', step: '1', half: true });
+    fields.push({ key: 'loan_term_months', label: 'Loan Term (months)', type: 'number', step: '1', half: true });
+    fields.push({ key: 'io_period_months', label: 'Interest-Only Period (months)', type: 'number', step: '1', default: 0, half: true });
+    return fields;
+}
+const VALUATION_FIELDS = buildValuationFields();
 
 
 const RECOVERY_STRUCTURE_FIELDS = [
@@ -1075,10 +2279,12 @@ const EXPENSE_RECOVERY_OVERRIDE_FIELDS = [
 
 // ─── Rent Schedule Builder ────────────────────────────────
 
-async function showRentScheduleBuilder(leaseId, propertyId) {
+async function showRentScheduleBuilder(leaseId, propertyId, areaUnit = 'sf') {
     const lease = await api.get(`/leases/${leaseId}`);
     const tenantName = lease.tenant ? lease.tenant.name : 'Lease';
     const baseRent = parseFloat(lease.base_rent_per_unit);
+    const isUnit = areaUnit === 'unit';
+    const rentUnitLabel = isUnit ? '$/Unit/mo' : '$/SF/yr';
 
     let overlay;
 
@@ -1115,7 +2321,7 @@ async function showRentScheduleBuilder(leaseId, propertyId) {
                 </p>
                 <div class="data-table-wrap" style="margin-bottom:16px">
                     <table class="data-table" style="margin-bottom:0">
-                        <thead><tr><th>Effective Date</th><th class="right">Rent $/SF/yr</th><th class="right">Change</th><th class="col-actions"></th></tr></thead>
+                        <thead><tr><th>Effective Date</th><th class="right">Rent ${rentUnitLabel}</th><th class="right">Change</th><th class="col-actions"></th></tr></thead>
                         <tbody>${scheduleRows}</tbody>
                     </table>
                 </div>
@@ -1129,7 +2335,7 @@ async function showRentScheduleBuilder(leaseId, propertyId) {
                         <input class="form-input" type="date" id="rsDate" />
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Rent $/SF/yr</label>
+                        <label class="form-label">Rent ${rentUnitLabel}</label>
                         <input class="form-input" type="number" step="0.01" id="rsRent" placeholder="Enter amount" />
                     </div>
                 </div>
@@ -1137,7 +2343,7 @@ async function showRentScheduleBuilder(leaseId, propertyId) {
                     <div class="form-group">
                         <label class="form-label">— or — % Increase from previous</label>
                         <input class="form-input" type="number" step="0.5" id="rsPct" placeholder="e.g. 3 for 3%" />
-                        <div class="form-help">Enter a percentage; the $/SF will be calculated automatically</div>
+                        <div class="form-help">Enter a percentage; the rent amount will be calculated automatically</div>
                     </div>
                     <div class="form-group" style="display:flex;align-items:flex-end">
                         <button class="btn btn-primary btn-sm" id="addStepBtn" style="width:100%">${icons.plus} Add Step</button>
@@ -1205,9 +2411,14 @@ async function showRentScheduleBuilder(leaseId, propertyId) {
 
 // ─── Lease Detail Modal (sub-resources) ──────────────────
 
-async function showLeaseDetailModal(leaseId, propertyId) {
+async function showLeaseDetailModal(leaseId, propertyId, marketProfiles, propertyType = '', areaUnit = 'sf') {
     const lease = await api.get(`/leases/${leaseId}`);
     const tenantName = lease.tenant ? lease.tenant.name : 'Vacant';
+
+    // Find the matching market profile for this lease's suite
+    const mps = marketProfiles || [];
+    const suiteSpaceType = lease.suite ? lease.suite.space_type : null;
+    const matchedMarket = suiteSpaceType ? mps.find(m => m.space_type === suiteSpaceType) : null;
 
     function renderSubTable(items, columns, emptyMsg) {
         if (!items || items.length === 0) {
@@ -1225,6 +2436,9 @@ async function showLeaseDetailModal(leaseId, propertyId) {
     // Build the modal content dynamically (so we can re-render on add/delete)
     let overlay;
 
+    const isMultifamilyLease = propertyType === 'multifamily' || propertyType === 'self_storage';
+    const rentUnitLabel = areaUnit === 'unit' ? '$/Unit/mo' : '$/SF/yr';
+
     async function render() {
         const fresh = await api.get(`/leases/${leaseId}`);
         const content = `
@@ -1234,9 +2448,33 @@ async function showLeaseDetailModal(leaseId, propertyId) {
                     <div><div class="info-item-label">Lease Type</div><div class="info-item-value">${fmt.typeLabel(fresh.lease_type)}</div></div>
                     <div><div class="info-item-label">Term</div><div class="info-item-value">${fmt.date(fresh.lease_start_date)} – ${fmt.date(fresh.lease_end_date)}</div></div>
                     <div><div class="info-item-label">Base Rent</div><div class="info-item-value" style="color:var(--accent)">${fmt.perSf(fresh.base_rent_per_unit)}</div></div>
-                    <div><div class="info-item-label">Escalation</div><div class="info-item-value">${fmt.typeLabel(fresh.escalation_type)}${fresh.escalation_pct_annual ? ' (' + fmt.pct(fresh.escalation_pct_annual) + ')' : ''}</div></div>
-                    <div><div class="info-item-label">Recovery</div><div class="info-item-value">${fmt.typeLabel(fresh.recovery_type)}</div></div>
+                    ${isMultifamilyLease ? '' : `<div><div class="info-item-label">Escalation</div><div class="info-item-value">${fmt.typeLabel(fresh.escalation_type)}${fresh.escalation_pct_annual ? ' (' + fmt.pct(fresh.escalation_pct_annual) + ')' : ''}</div></div>`}
+                    ${isMultifamilyLease ? '' : `<div><div class="info-item-label">Recovery</div><div class="info-item-value">${fmt.typeLabel(fresh.recovery_type)}</div></div>`}
                 </div>
+
+                <!-- Effective Assumptions (resolved values the engine will use) -->
+                ${matchedMarket ? `
+                <div class="effective-assumptions">
+                    <div class="effective-assumptions-title">Effective Assumptions (resolved)</div>
+                    <div class="effective-assumptions-grid">
+                        <div>
+                            <span class="effective-label">${isMultifamilyLease ? 'Retention Rate' : 'Renewal Probability'}</span>
+                            <span class="effective-value">${fresh.renewal_probability != null ? fmt.pct(fresh.renewal_probability) + ' <em>(lease override)</em>' : fmt.pct(matchedMarket.renewal_probability) + ' <em>(market default)</em>'}</span>
+                        </div>
+                        ${isMultifamilyLease ? '' : `<div>
+                            <span class="effective-label">Renewal Rent Adjustment</span>
+                            <span class="effective-value">${fresh.renewal_rent_spread_pct != null ? fmt.pct(fresh.renewal_rent_spread_pct) + ' <em>(lease override)</em>' : fmt.pct(matchedMarket.renewal_rent_adjustment_pct) + ' <em>(market default)</em>'}</span>
+                        </div>`}
+                        <div>
+                            <span class="effective-label">Market Rent</span>
+                            <span class="effective-value">${fmt.perSf(matchedMarket.market_rent_per_unit)}</span>
+                        </div>
+                        ${isMultifamilyLease ? '' : `<div>
+                            <span class="effective-label">Recovery Type</span>
+                            <span class="effective-value">${fresh.recovery_structure_id ? 'From template' : fmt.typeLabel(fresh.recovery_type)}${fresh.expense_recovery_overrides.length > 0 ? ' + ' + fresh.expense_recovery_overrides.length + ' override(s)' : ''}</span>
+                        </div>`}
+                    </div>
+                </div>` : ''}
 
                 <!-- Rent Schedule -->
                 <div class="form-section" style="display:flex;justify-content:space-between;align-items:center">
@@ -1247,7 +2485,7 @@ async function showLeaseDetailModal(leaseId, propertyId) {
                     ${fresh.rent_steps.length === 0
                         ? '<div style="color:var(--text-tertiary);font-size:0.87rem;padding:4px 0">No custom rent steps. Rent escalates per the escalation type above.</div>'
                         : `<div class="data-table-wrap"><table class="data-table" style="margin-bottom:0">
-                            <thead><tr><th>Effective Date</th><th class="right">Rent $/SF/yr</th></tr></thead>
+                            <thead><tr><th>Effective Date</th><th class="right">Rent ${rentUnitLabel}</th></tr></thead>
                             <tbody>${fresh.rent_steps.sort((a, b) => a.effective_date.localeCompare(b.effective_date)).map(rs => `<tr>
                                 <td>${fmt.dateFull(rs.effective_date)}</td>
                                 <td class="mono right">${fmt.perSf(rs.rent_per_unit)}</td>
@@ -1278,7 +2516,7 @@ async function showLeaseDetailModal(leaseId, propertyId) {
                 </div>
 
                 <!-- Expense Recovery Overrides -->
-                <div class="form-section" style="display:flex;justify-content:space-between;align-items:center">
+                ${isMultifamilyLease ? '' : `<div class="form-section" style="display:flex;justify-content:space-between;align-items:center">
                     <span>Expense Recovery Overrides (${fresh.expense_recovery_overrides.length})</span>
                     <button class="btn btn-secondary btn-sm" id="addRecoveryOverride">${icons.plus} Add</button>
                 </div>
@@ -1297,7 +2535,7 @@ async function showLeaseDetailModal(leaseId, propertyId) {
                             </tr>`).join('')}</tbody>
                         </table>`
                     }
-                </div>
+                </div>`}
 
                 <div class="modal-actions">
                     <button class="btn btn-secondary" id="closeDetail">Close</button>
@@ -1319,7 +2557,7 @@ async function showLeaseDetailModal(leaseId, propertyId) {
         overlay.querySelector('#openRentSchedule').onclick = () => {
             overlay.remove();
             overlay = null;
-            showRentScheduleBuilder(leaseId, propertyId);
+            showRentScheduleBuilder(leaseId, propertyId, areaUnit);
         };
 
         // Add Free Rent Period
@@ -1645,23 +2883,19 @@ async function propertyView({ id }) {
 
         <div class="tab-bar" id="tabBar">
             <button class="tab-item active" data-tab="rent-roll">Rent Roll</button>
-            <button class="tab-item" data-tab="expenses">Expenses</button>
-            <button class="tab-item" data-tab="other-income">Other Income</button>
+            <button class="tab-item" data-tab="operating-budget">Operating Budget</button>
             ${simplifyUnitAssumptions ? '' : '<button class="tab-item" data-tab="market">Market Profiles</button>'}
             <button class="tab-item" data-tab="capital">Capital Projects</button>
-            <button class="tab-item" data-tab="recovery">Recovery Structures</button>
-            <button class="tab-item" data-tab="recovery-audit">Tenant Recovery Audit</button>
+            ${simplifyUnitAssumptions ? '' : '<button class="tab-item" data-tab="recovery-audit">Tenant Recovery Audit</button>'}
             <button class="tab-item" data-tab="valuations">Valuations</button>
+            ${simplifyUnitAssumptions ? '' : '<button class="tab-item tab-item--subtle" data-tab="recovery">Recovery Structures</button>'}
         </div>
 
         <div class="tab-content active" id="tab-rent-roll">
             ${renderRentRollTab(property, allLeases, marketProfiles)}
         </div>
-        <div class="tab-content" id="tab-expenses">
-            ${renderExpensesTab(expenses, totalArea, property.area_unit)}
-        </div>
-        <div class="tab-content" id="tab-other-income">
-            ${renderOtherIncomeTab(otherIncomeItems)}
+        <div class="tab-content" id="tab-operating-budget">
+            ${renderOperatingBudgetTab(expenses, otherIncomeItems, totalArea, property.area_unit, property.property_type)}
         </div>
         ${simplifyUnitAssumptions ? '' : `<div class="tab-content" id="tab-market">
             ${renderMarketTab(marketProfiles, property)}
@@ -1669,12 +2903,12 @@ async function propertyView({ id }) {
         <div class="tab-content" id="tab-capital">
             ${renderCapitalProjectsTab(capitalProjects, id)}
         </div>
-        <div class="tab-content" id="tab-recovery">
+        ${simplifyUnitAssumptions ? '' : `<div class="tab-content" id="tab-recovery">
             ${renderRecoveryStructuresTab(recoveryStructures, id)}
         </div>
         <div class="tab-content" id="tab-recovery-audit">
             ${renderRecoveryAuditTab(completedValuations)}
-        </div>
+        </div>`}
         <div class="tab-content" id="tab-valuations">
             ${renderValuationsTab(valuations, id)}
         </div>`;
@@ -1896,7 +3130,7 @@ async function propertyView({ id }) {
     // New valuation button
     const newValBtn = document.getElementById('newValuationBtn');
     if (newValBtn) {
-        newValBtn.addEventListener('click', () => showNewValuationModal(id));
+        newValBtn.addEventListener('click', () => showNewValuationModal(id, marketProfiles, property.property_type));
     }
 
     // Edit Property
@@ -1924,14 +3158,18 @@ async function propertyView({ id }) {
     });
 
     // Edit Market Rents (unit-type properties only — inline in rent roll)
-    const editMktBtn = document.getElementById('editMktRentsBtn');
-    if (editMktBtn) {
-        editMktBtn.addEventListener('click', () => openUnitMarketQuickSetup(id, property, marketProfiles));
-    }
+    document.querySelectorAll('#editMktRentsBtn, #editMktRentsHdrBtn').forEach(btn => {
+        btn.addEventListener('click', () => openMarketAssumptionWorkspace(id, property, marketProfiles));
+    });
 
     const editRentUnitBtn = document.getElementById('editRentUnitBtn');
     if (editRentUnitBtn) {
         editRentUnitBtn.addEventListener('click', () => openUnitInPlaceRentEditor(id, allLeases));
+    }
+
+    const bulkMarketBtn = document.getElementById('bulkMarketBtn');
+    if (bulkMarketBtn) {
+        bulkMarketBtn.addEventListener('click', () => openMarketAssumptionWorkspace(id, property, marketProfiles));
     }
 
     // Quick market setup in Market tab for unit-type properties
@@ -1940,7 +3178,126 @@ async function propertyView({ id }) {
         quickUnitMarketBtn.addEventListener('click', () => openUnitMarketQuickSetup(id, property, marketProfiles));
     }
 
-    // New Suite
+    // ── Multifamily: unified unit type add/edit ──
+    const newUnitTypeBtn = document.getElementById('newUnitTypeBtn');
+    if (newUnitTypeBtn) {
+        newUnitTypeBtn.addEventListener('click', () => {
+            showFormModal({
+                title: 'Add Unit Type',
+                fields: buildUnitTypeFields(property.area_unit),
+                onSubmit: async (data, overlay) => {
+                    // Create the suite
+                    const suiteData = {
+                        suite_name: data.suite_name,
+                        space_type: data.space_type,
+                        area: data.area,
+                        is_available: true,
+                    };
+                    const suite = await api.post(`/properties/${id}/suites`, suiteData);
+                    // Create a lease if not vacant
+                    if (!data.is_vacant && data.base_rent_per_unit) {
+                        const leaseData = {
+                            lease_type: 'in_place',
+                            base_rent_per_unit: data.base_rent_per_unit,
+                            rent_payment_frequency: 'monthly',
+                            lease_start_date: data.lease_start_date,
+                            lease_end_date: data.lease_end_date,
+                            escalation_type: 'flat',
+                            recovery_type: 'none',
+                        };
+                        // Optionally create tenant from resident name
+                        if (data.resident_name && data.resident_name.trim()) {
+                            const tenant = await api.post(`/properties/${id}/tenants`, { name: data.resident_name.trim() });
+                            leaseData.tenant_id = tenant.id;
+                        }
+                        await api.post(`/suites/${suite.id}/leases`, leaseData);
+                    }
+                    overlay.remove();
+                    toast('Unit type added', 'success');
+                    propertyView({ id });
+                }
+            });
+        });
+    }
+
+    // Edit Unit Type (unified suite + lease edit for multifamily)
+    document.querySelectorAll('[data-edit-unit-type]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const sid = btn.dataset.editUnitType;
+            const suite = property.suites.find(s => s.id === sid);
+            const lease = allLeases.find(l => l.suite.id === sid);
+            // Build initial values from suite + lease
+            const initialValues = {
+                suite_name: suite.suite_name,
+                space_type: suite.space_type,
+                area: suite.area,
+                is_vacant: !lease,
+                resident_name: lease && lease.tenant ? lease.tenant.name : '',
+                base_rent_per_unit: lease ? lease.base_rent_per_unit : '',
+                lease_start_date: lease ? lease.lease_start_date : '',
+                lease_end_date: lease ? lease.lease_end_date : '',
+            };
+            showFormModal({
+                title: `Edit — ${suite.suite_name}`,
+                fields: buildUnitTypeFields(property.area_unit),
+                initialValues,
+                onSubmit: async (data, overlay) => {
+                    // Update suite
+                    await api.put(`/properties/${id}/suites/${sid}`, {
+                        suite_name: data.suite_name,
+                        space_type: data.space_type,
+                        area: data.area,
+                        is_available: true,
+                    });
+                    if (data.is_vacant) {
+                        // Delete existing lease if marking vacant
+                        if (lease) {
+                            await api.del(`/leases/${lease.id}`);
+                        }
+                    } else if (lease) {
+                        // Update existing lease
+                        const leaseUpdate = {
+                            base_rent_per_unit: data.base_rent_per_unit,
+                            lease_start_date: data.lease_start_date,
+                            lease_end_date: data.lease_end_date,
+                        };
+                        // Handle resident name change
+                        if (data.resident_name && data.resident_name.trim()) {
+                            if (!lease.tenant || lease.tenant.name !== data.resident_name.trim()) {
+                                const tenant = await api.post(`/properties/${id}/tenants`, { name: data.resident_name.trim() });
+                                leaseUpdate.tenant_id = tenant.id;
+                            }
+                        } else if (lease.tenant) {
+                            leaseUpdate.tenant_id = null;
+                        }
+                        await api.put(`/leases/${lease.id}`, leaseUpdate);
+                    } else {
+                        // Create new lease for previously vacant suite
+                        const leaseData = {
+                            lease_type: 'in_place',
+                            base_rent_per_unit: data.base_rent_per_unit,
+                            rent_payment_frequency: 'monthly',
+                            lease_start_date: data.lease_start_date,
+                            lease_end_date: data.lease_end_date,
+                            escalation_type: 'flat',
+                            recovery_type: 'none',
+                        };
+                        if (data.resident_name && data.resident_name.trim()) {
+                            const tenant = await api.post(`/properties/${id}/tenants`, { name: data.resident_name.trim() });
+                            leaseData.tenant_id = tenant.id;
+                        }
+                        await api.post(`/suites/${sid}/leases`, leaseData);
+                    }
+                    overlay.remove();
+                    toast('Unit type updated', 'success');
+                    propertyView({ id });
+                }
+            });
+        });
+    });
+
+    // New Suite (commercial only — hidden for multifamily)
     const newSuiteBtn = document.getElementById('newSuiteBtn');
     if (newSuiteBtn) {
         newSuiteBtn.addEventListener('click', () => {
@@ -1958,7 +3315,7 @@ async function propertyView({ id }) {
         });
     }
 
-    // Edit Suite
+    // Edit Suite (commercial only)
     document.querySelectorAll('[data-edit-suite]').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -2005,7 +3362,8 @@ async function propertyView({ id }) {
                 onNewTenant,
                 recoveryStructures,
                 opts.includeSuite !== false,
-                property.area_unit
+                property.area_unit,
+                property.property_type
             );
             const formOverlay = showFormModal({
                 title,
@@ -2022,7 +3380,7 @@ async function propertyView({ id }) {
                         e.preventDefault();
                         showFormModal({
                             title: 'New Tenant',
-                            fields: TENANT_FIELDS,
+                            fields: buildTenantFields(property.property_type),
                             onSubmit: async (data, tenantOverlay) => {
                                 const newTenant = await api.post(`/properties/${id}/tenants`, data);
                                 tenantOverlay.remove();
@@ -2063,7 +3421,7 @@ async function propertyView({ id }) {
     document.querySelectorAll('[data-schedule-lease]').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            showRentScheduleBuilder(btn.dataset.scheduleLease, id);
+            showRentScheduleBuilder(btn.dataset.scheduleLease, id, property.area_unit);
         });
     });
 
@@ -2071,7 +3429,7 @@ async function propertyView({ id }) {
     document.querySelectorAll('[data-detail-lease]').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            showLeaseDetailModal(btn.dataset.detailLease, id);
+            showLeaseDetailModal(btn.dataset.detailLease, id, marketProfiles, property.property_type, property.area_unit);
         });
     });
 
@@ -2107,12 +3465,13 @@ async function propertyView({ id }) {
     });
 
     // New Expense
+    const expenseFields = buildExpenseFields(property.property_type);
     const newExpenseBtn = document.getElementById('newExpenseBtn');
     if (newExpenseBtn) {
         newExpenseBtn.addEventListener('click', () => {
             showFormModal({
                 title: 'New Expense',
-                fields: EXPENSE_FIELDS,
+                fields: expenseFields,
                 onSubmit: async (data, overlay) => {
                     await api.post(`/properties/${id}/expenses`, data);
                     overlay.remove();
@@ -2123,6 +3482,11 @@ async function propertyView({ id }) {
         });
     }
 
+    const bulkExpenseBtn = document.getElementById('bulkExpenseBtn');
+    if (bulkExpenseBtn) {
+        bulkExpenseBtn.addEventListener('click', () => openExpenseWorkspace(id, expenses, property.property_type));
+    }
+
     // Edit Expense
     document.querySelectorAll('[data-edit-expense]').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -2131,7 +3495,7 @@ async function propertyView({ id }) {
             const exp = expenses.find(x => x.id === eid);
             showFormModal({
                 title: 'Edit Expense',
-                fields: EXPENSE_FIELDS,
+                fields: expenseFields,
                 initialValues: exp,
                 onSubmit: async (data, overlay) => {
                     await api.put(`/properties/${id}/expenses/${eid}`, data);
@@ -2172,6 +3536,11 @@ async function propertyView({ id }) {
                 }
             });
         });
+    }
+
+    const bulkOtherIncomeBtn = document.getElementById('bulkOtherIncomeBtn');
+    if (bulkOtherIncomeBtn) {
+        bulkOtherIncomeBtn.addEventListener('click', () => openOtherIncomeWorkspace(id, otherIncomeItems));
     }
 
     // Edit Other Income
@@ -2269,7 +3638,7 @@ async function propertyView({ id }) {
             const val = valuations.find(v => v.id === vid);
             showFormModal({
                 title: 'Edit Valuation',
-                fields: VALUATION_FIELDS,
+                fields: buildValuationFields(property.property_type),
                 wide: true,
                 initialValues: val,
                 onSubmit: async (data, overlay) => {
@@ -2429,24 +3798,82 @@ function renderRentRollTab(property, allLeases, marketProfiles) {
     const areaLabel = isUnit ? 'Units' : 'Area (SF)';
     const rentLabel = isUnit ? 'Rent/Unit' : 'Rent/SF';
 
+    // ── Multifamily: unified one-row-per-unit-type layout ──
+    if (simplifyUnitAssumptions) {
+        const rows = property.suites.map(suite => {
+            const leases = allLeases.filter(l => l.suite.id === suite.id);
+            const mla = mlaByType[suite.space_type];
+            const lease = leases[0]; // one lease per unit type
+            const isVacant = !lease;
+            const displayName = lease && lease.tenant ? lease.tenant.name : '';
+            const annualRent = lease ? parseFloat(lease.base_rent_per_unit) * parseFloat(suite.area) : 0;
+
+            const actions = `<div class="card-actions" style="display:inline-flex;gap:4px;align-items:center">
+                <button class="btn-icon" data-edit-unit-type="${suite.id}" title="Edit unit type">${icons.edit}</button>
+                <button class="btn-icon danger" data-delete-suite="${suite.id}" title="Delete unit type">${icons.trash}</button>
+            </div>`;
+
+            return `<tr>
+                <td>${actions}</td>
+                <td>${suite.suite_name}</td>
+                <td>${suite.space_type}</td>
+                <td class="mono right">${fmt.num(suite.area)}</td>
+                <td class="${isVacant ? 'vacant' : 'tenant-name'}">${isVacant ? 'Vacant' : displayName || 'Occupied'}</td>
+                <td>${lease ? fmt.date(lease.lease_start_date) : '—'}</td>
+                <td>${lease ? fmt.date(lease.lease_end_date) : '—'}</td>
+                <td class="mono right" style="color:var(--accent)">${mla ? fmt.perSf(mla.market_rent_per_unit, au) : '<span style="color:var(--text-tertiary)">—</span>'}</td>
+                <td class="mono right">${lease ? fmt.perSf(lease.base_rent_per_unit, au) : '—'}</td>
+                <td class="mono right">${mla ? fmt.pct(mla.rent_growth_rate_pct) : '<span style="color:var(--text-tertiary)">—</span>'}</td>
+                <td class="mono right">${annualRent > 0 ? fmt.currencyExact(annualRent) : '—'}</td>
+            </tr>`;
+        }).join('');
+
+        const totalRent = allLeases.reduce((s, l) => s + parseFloat(l.base_rent_per_unit) * parseFloat(l.suite.area), 0);
+        const colCount = 11;
+
+        return `
+            <div class="section-header">
+                <h3 class="section-title">Rent Roll</h3>
+                <div class="btn-group">
+                    <button class="btn btn-primary btn-sm" id="newUnitTypeBtn">${icons.plus} Add Unit Type</button>
+                </div>
+            </div>
+            <div class="page-subtitle" style="margin-bottom:10px">Each row is a unit type. Market assumptions are managed inline via the <button class="btn-icon" id="editMktRentsBtn" title="Assumption workspace" style="vertical-align:middle">${icons.edit}</button> buttons below.</div>
+            <div class="data-table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Unit Type</th>
+                            <th>Key</th>
+                            <th class="right">${areaLabel}</th>
+                            <th>Resident</th>
+                            <th>Start</th>
+                            <th>End</th>
+                            <th class="right">Mkt Rent <button class="btn-icon" id="editMktRentsHdrBtn" title="Edit market rents" style="vertical-align:middle">${icons.edit}</button></th>
+                            <th class="right">${rentLabel} <button class="btn-icon" id="editRentUnitBtn" title="Edit in-place rents" style="vertical-align:middle">${icons.edit}</button></th>
+                            <th class="right">Growth</th>
+                            <th class="right">Annual Rent</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows || `<tr><td colspan="${colCount}" style="text-align:center;color:var(--text-tertiary);padding:32px">No unit types yet. Click "Add Unit Type" to get started.</td></tr>`}</tbody>
+                    ${totalRent > 0 ? `<tfoot>
+                        <tr>
+                            <td colspan="${colCount - 1}" style="text-align:right">Total Annual Rent</td>
+                            <td style="text-align:right">${fmt.currencyExact(totalRent)}</td>
+                        </tr>
+                    </tfoot>` : ''}
+                </table>
+            </div>`;
+    }
+
+    // ── Commercial: original multi-row layout ──
     const rows = property.suites.map(suite => {
         const leases = allLeases.filter(l => l.suite.id === suite.id);
         const suiteActions = `<div class="card-actions" style="display:inline-flex">
             <button class="btn-icon" data-edit-suite="${suite.id}" title="Edit suite">${icons.edit}</button>
             <button class="btn-icon danger" data-delete-suite="${suite.id}" title="Delete suite">${icons.trash}</button>
         </div>`;
-
-        // Market rent columns for unit-type properties
-        const mla = mlaByType[suite.space_type];
-        const mktRentCell = isUnit
-            ? `<td class="mono right" style="color:var(--accent)">${mla ? fmt.perSf(mla.market_rent_per_unit, au) : '<span style="color:var(--text-tertiary)">—</span>'}</td>`
-            : '';
-        const mktGrowthCell = isUnit
-            ? `<td class="mono right">${mla ? fmt.pct(mla.rent_growth_rate_pct) : '<span style="color:var(--text-tertiary)">—</span>'}</td>`
-            : '';
-        // Only show on first row per suite
-        const mktRentCellEmpty = isUnit ? '<td></td>' : '';
-        const mktGrowthCellEmpty = isUnit ? '<td></td>' : '';
 
         if (leases.length === 0) {
             return `<tr>
@@ -2457,9 +3884,7 @@ function renderRentRollTab(property, allLeases, marketProfiles) {
                 <td>—</td>
                 <td>—</td>
                 <td>—</td>
-                ${mktRentCell}
                 <td class="mono right">—</td>
-                ${mktGrowthCell}
                 <td class="mono right">—</td>
                 <td>—</td>
                 <td class="col-actions"></td>
@@ -2483,9 +3908,7 @@ function renderRentRollTab(property, allLeases, marketProfiles) {
                 <td>${fmt.typeLabel(l.lease_type)}</td>
                 <td>${fmt.date(l.lease_start_date)}</td>
                 <td>${fmt.date(l.lease_end_date)}</td>
-                ${i === 0 ? mktRentCell : mktRentCellEmpty}
                 <td class="mono right">${fmt.perSf(l.base_rent_per_unit, au)}</td>
-                ${i === 0 ? mktGrowthCell : mktGrowthCellEmpty}
                 <td class="mono right">${fmt.currencyExact(parseFloat(l.base_rent_per_unit) * parseFloat(suite.area))}</td>
                 <td>${fmt.typeLabel(l.recovery_type)}</td>
                 <td class="col-actions">${leaseActions}</td>
@@ -2497,18 +3920,7 @@ function renderRentRollTab(property, allLeases, marketProfiles) {
         const area = parseFloat(l.suite.area);
         return s + parseFloat(l.base_rent_per_unit) * area;
     }, 0);
-    const colCount = isUnit ? 13 : 11;
-
-    // For unit-type: show inline market rent edit button in header
-    const mktRentHeader = isUnit
-        ? `<th class="right">Mkt Rent <button class="btn-icon" id="editMktRentsBtn" title="Edit market rents" style="vertical-align:middle">${icons.edit}</button></th>`
-        : '';
-    const inPlaceRentHeader = isUnit
-        ? `<th class="right">${rentLabel} <button class="btn-icon" id="editRentUnitBtn" title="Edit in-place rents" style="vertical-align:middle">${icons.edit}</button></th>`
-        : `<th class="right">${rentLabel}</th>`;
-    const mktGrowthHeader = isUnit
-        ? `<th class="right">Growth</th>`
-        : '';
+    const colCount = 11;
 
     return `
         <div class="section-header">
@@ -2518,7 +3930,6 @@ function renderRentRollTab(property, allLeases, marketProfiles) {
                 <button class="btn btn-primary btn-sm" id="newLeaseBtn">${icons.plus} New Lease</button>
             </div>
         </div>
-        ${isUnit && simplifyUnitAssumptions ? '<div class="page-subtitle" style="margin-bottom:10px">Market leasing assumptions are managed directly here in the rent roll for multifamily and self-storage.</div>' : ''}
         <div class="data-table-wrap">
             <table class="data-table">
                 <thead>
@@ -2530,9 +3941,7 @@ function renderRentRollTab(property, allLeases, marketProfiles) {
                         <th>Lease Type</th>
                         <th>Start</th>
                         <th>End</th>
-                        ${mktRentHeader}
-                        ${inPlaceRentHeader}
-                        ${mktGrowthHeader}
+                        <th class="right">${rentLabel}</th>
                         <th class="right">Annual Rent</th>
                         <th>Recovery</th>
                         <th class="col-actions"></th>
@@ -2551,17 +3960,27 @@ function renderRentRollTab(property, allLeases, marketProfiles) {
 }
 
 
-function renderExpensesTab(expenses, totalArea, areaUnit) {
+function renderOperatingBudgetTab(expenses, otherIncomeItems, totalArea, areaUnit, propertyType) {
+    return `
+        ${renderExpensesTab(expenses, totalArea, areaUnit, propertyType)}
+        <div style="margin-top:32px">
+            ${renderOtherIncomeTab(otherIncomeItems)}
+        </div>`;
+}
+
+function renderExpensesTab(expenses, totalArea, areaUnit, propertyType) {
+    const isMultifamily = propertyType === 'multifamily' || propertyType === 'self_storage';
     const perUnitLabel = areaUnit === 'unit' ? '$/Unit' : '$/SF';
     const totalExp = expenses.reduce((s, e) => s + (e.is_pct_of_egi ? 0 : parseFloat(e.base_year_amount)), 0);
+    const colCount = isMultifamily ? 6 : 7;
     const rows = expenses.map(e => `
         <tr>
             <td class="tenant-name">${fmt.typeLabel(e.category)}</td>
             <td>${e.description || '—'}</td>
             <td class="mono right">${e.is_pct_of_egi ? fmt.pct(e.pct_of_egi) + ' of EGI' : fmt.currencyExact(e.base_year_amount)}</td>
             <td class="mono right">${e.is_pct_of_egi ? '—' : fmt.perSf(parseFloat(e.base_year_amount) / totalArea, areaUnit)}</td>
-            <td class="mono right">${fmt.pct(e.growth_rate_pct)}</td>
-            <td>${e.is_recoverable ? 'Yes' : 'No'}</td>
+            <td class="mono right">${e.is_pct_of_egi ? '—' : fmt.pct(e.growth_rate_pct)}</td>
+            ${isMultifamily ? '' : `<td>${e.is_recoverable ? 'Yes' : 'No'}</td>`}
             <td class="col-actions">
                 <div class="card-actions" style="display:inline-flex">
                     <button class="btn-icon" data-edit-expense="${e.id}" title="Edit">${icons.edit}</button>
@@ -2573,7 +3992,10 @@ function renderExpensesTab(expenses, totalArea, areaUnit) {
     return `
         <div class="section-header">
             <h3 class="section-title">Operating Expenses</h3>
-            <button class="btn btn-primary btn-sm" id="newExpenseBtn">${icons.plus} New Expense</button>
+            <div class="btn-group">
+                <button class="btn btn-secondary btn-sm" id="bulkExpenseBtn">Bulk Edit</button>
+                <button class="btn btn-primary btn-sm" id="newExpenseBtn">${icons.plus} New Expense</button>
+            </div>
         </div>
         <div class="data-table-wrap">
             <table class="data-table">
@@ -2584,11 +4006,11 @@ function renderExpensesTab(expenses, totalArea, areaUnit) {
                         <th class="right">Base Amount</th>
                         <th class="right">${perUnitLabel}</th>
                         <th class="right">Growth</th>
-                        <th>Recoverable</th>
+                        ${isMultifamily ? '' : '<th>Recoverable</th>'}
                         <th class="col-actions"></th>
                     </tr>
                 </thead>
-                <tbody>${rows || '<tr><td colspan="7" style="text-align:center;color:var(--text-tertiary);padding:32px">No expenses defined</td></tr>'}</tbody>
+                <tbody>${rows || `<tr><td colspan="${colCount}" style="text-align:center;color:var(--text-tertiary);padding:32px">No expenses defined</td></tr>`}</tbody>
                 ${totalExp > 0 ? `<tfoot>
                     <tr>
                         <td colspan="2">Total (excl. % of EGI items)</td>
@@ -2620,7 +4042,10 @@ function renderOtherIncomeTab(items) {
     return `
         <div class="section-header">
             <h3 class="section-title">Custom Revenue Line Items</h3>
-            <button class="btn btn-primary btn-sm" id="newOtherIncomeBtn">${icons.plus} New Revenue Item</button>
+            <div class="btn-group">
+                <button class="btn btn-secondary btn-sm" id="bulkOtherIncomeBtn">Bulk Edit</button>
+                <button class="btn btn-primary btn-sm" id="newOtherIncomeBtn">${icons.plus} New Revenue Item</button>
+            </div>
         </div>
         <div class="data-table-wrap">
             <table class="data-table">
@@ -2653,11 +4078,12 @@ function renderMarketTab(profiles, property) {
         <div class="section-header">
             <h3 class="section-title">Market Leasing Profiles</h3>
             <div style="display:flex;gap:8px">
-                ${isUnit ? '<button class="btn btn-secondary btn-sm" id="quickUnitMarketBtn">Quick Setup (All Unit Types)</button>' : ''}
+                <button class="btn btn-secondary btn-sm" id="bulkMarketBtn">Assumption Workspace</button>
+                ${isUnit ? '<button class="btn btn-secondary btn-sm" id="quickUnitMarketBtn">Legacy Quick Setup</button>' : ''}
                 <button class="btn btn-primary btn-sm" id="newMarketBtn">${icons.plus} New Market Profile</button>
             </div>
         </div>
-        ${isUnit ? '<div class="page-subtitle" style="margin-bottom:12px">For multifamily and self-storage, Quick Setup updates all unit types in one form. Use the "Apply same assumptions to all unit types" toggle for one-click shared inputs.</div>' : ''}
+        ${isUnit ? '<div class="page-subtitle" style="margin-bottom:12px">Assumption Workspace gives spreadsheet-style entry with bulk paste, fill-down, and auto-population for all unit types.</div>' : ''}
         ${profiles.length === 0 ? '<div class="empty-state"><h3>No market profiles</h3><p>Add a market profile to enable renewal and new-tenant modeling.</p></div>' : `
         <div class="property-grid" style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr))">
             ${profiles.map(p => `
@@ -2687,12 +4113,31 @@ function renderMarketTab(profiles, property) {
                                 <div class="info-item-value">${fmt.pct(p.renewal_probability)}</div>
                             </div>
                             <div>
-                                <div class="info-item-label">Downtime</div>
-                                <div class="info-item-value">${p.downtime_months} mo</div>
+                                <div class="info-item-label">Concession Timing</div>
+                                <div class="info-item-value">${fmt.typeLabel(p.concession_timing_mode || 'blended')}</div>
                             </div>
+                            <div>
+                                <div class="info-item-label">New Concession</div>
+                                <div class="info-item-value">${p.new_tenant_free_rent_months || 0} mo</div>
+                            </div>
+                            <div>
+                                <div class="info-item-label">Renewal Concession</div>
+                                <div class="info-item-value">${p.renewal_free_rent_months || 0} mo</div>
+                            </div>
+                            ${(p.concession_timing_mode || 'blended') === 'timed' ? `
+                            <div>
+                                <div class="info-item-label">Timed Concessions</div>
+                                <div class="info-item-value">
+                                    Y1 ${p.concession_year1_months ?? '—'} | Y2 ${p.concession_year2_months ?? '—'} | Y3 ${p.concession_year3_months ?? '—'} | Y4 ${p.concession_year4_months ?? '—'} | Y5 ${p.concession_year5_months ?? '—'} | Y6+ ${p.concession_stabilized_months ?? '—'}
+                                </div>
+                            </div>` : ''}
                             <div>
                                 <div class="info-item-label">New TI${au === 'unit' ? '/Unit' : '/SF'}</div>
                                 <div class="info-item-value">${fmt.perSf(p.new_tenant_ti_per_sf, au)}</div>
+                            </div>
+                            <div>
+                                <div class="info-item-label">Downtime</div>
+                                <div class="info-item-value">${p.downtime_months} mo</div>
                             </div>
                             <div>
                                 <div class="info-item-label">Vacancy</div>
@@ -2892,6 +4337,8 @@ async function helpView() {
                 <h3>Revenue Waterfall</h3>
                 <div class="help-row"><strong>Gross Potential Rent (GPR)</strong><span>Contract base rent before free rent/vacancy.</span></div>
                 <div class="help-row"><strong>Scheduled Rent</strong><span><code>GPR + Free Rent</code> (free rent is negative).</span></div>
+                <div class="help-row"><strong>Unit-Type Concession Drag (Multifamily / Storage)</strong><span>For market-occupancy months, expected free-rent drag uses <code>((1 - Renewal Prob) × New Concession Mo + Renewal Prob × Renewal Concession Mo) / 12</code> applied to monthly market rent.</span></div>
+                <div class="help-row"><strong>Timed Concession Mode</strong><span>Override blended drag with explicit concession months by analysis year (Y1-Y5 and Y6+ stabilized).</span></div>
                 <div class="help-row"><strong>Gross Potential Income (GPI)</strong><span><code>Scheduled Rent + Recoveries + % Rent + Other Income</code>.</span></div>
                 <div class="help-row"><strong>Effective Gross Income (EGI)</strong><span><code>GPI - General Vacancy - Credit Loss</code>.</span></div>
                 <div class="help-example">
@@ -3007,11 +4454,12 @@ async function tenantsView({ propertyId } = {}) {
         `<option value="${p.id}" ${p.id === selectedProperty.id ? 'selected' : ''}>${p.name}</option>`
     )).join('');
 
+    const isUnitTenants = selectedProperty.property_type === 'multifamily' || selectedProperty.property_type === 'self_storage';
     const rows = tenants.map(t => `
         <tr>
             <td class="tenant-name">${t.name}</td>
-            <td>${t.credit_rating || '—'}</td>
-            <td>${t.industry || '—'}</td>
+            ${isUnitTenants ? '' : `<td>${t.credit_rating || '—'}</td>`}
+            ${isUnitTenants ? '' : `<td>${t.industry || '—'}</td>`}
             <td>${t.contact_name || '—'}</td>
             <td>${t.contact_email || '—'}</td>
             <td>
@@ -3045,14 +4493,14 @@ async function tenantsView({ propertyId } = {}) {
                 <thead>
                     <tr>
                         <th>Name</th>
-                        <th>Credit Rating</th>
-                        <th>Industry</th>
+                        ${isUnitTenants ? '' : '<th>Credit Rating</th>'}
+                        ${isUnitTenants ? '' : '<th>Industry</th>'}
                         <th>Contact</th>
                         <th>Email</th>
                         <th></th>
                     </tr>
                 </thead>
-                <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:var(--text-tertiary);padding:32px">No tenants yet</td></tr>'}</tbody>
+                <tbody>${rows || `<tr><td colspan="${isUnitTenants ? 4 : 6}" style="text-align:center;color:var(--text-tertiary);padding:32px">No tenants yet</td></tr>`}</tbody>
             </table>
         </div>`;
 
@@ -3067,7 +4515,7 @@ async function tenantsView({ propertyId } = {}) {
     document.getElementById('newTenantBtn').addEventListener('click', () => {
         showFormModal({
             title: 'New Tenant',
-            fields: TENANT_FIELDS,
+            fields: buildTenantFields(selectedProperty.property_type),
             onSubmit: async (data, overlay) => {
                 await api.post(`/properties/${selectedProperty.id}/tenants`, data);
                 overlay.remove();
@@ -3084,7 +4532,7 @@ async function tenantsView({ propertyId } = {}) {
             const t = tenants.find(x => x.id === tid);
             showFormModal({
                 title: 'Edit Tenant',
-                fields: TENANT_FIELDS,
+                fields: buildTenantFields(selectedProperty.property_type),
                 initialValues: t,
                 onSubmit: async (data, overlay) => {
                     await api.put(`/properties/${selectedProperty.id}/tenants/${tid}`, data);
@@ -3113,10 +4561,19 @@ async function tenantsView({ propertyId } = {}) {
 
 // ─── New Valuation Modal ──────────────────────────────────────
 
-function showNewValuationModal(propertyId) {
+function showNewValuationModal(propertyId, marketProfiles, propertyType = '') {
+    // Compute dynamic stabilized occupancy default from market vacancy rates
+    const mps = marketProfiles || [];
+    const avgVacancy = mps.length > 0
+        ? mps.reduce((s, m) => s + parseFloat(m.general_vacancy_pct || 0.05), 0) / mps.length
+        : 0.05;
+    const dynamicOccupancy = Math.round((1 - avgVacancy) * 10000) / 10000;
+    const fields = buildValuationFields(propertyType).map(f =>
+        f.key === 'stabilized_occupancy_pct' ? { ...f, default: dynamicOccupancy } : f
+    );
     showFormModal({
         title: 'New Valuation',
-        fields: VALUATION_FIELDS,
+        fields,
         wide: true,
         onSubmit: async (data, overlay) => {
             const val = await api.post(`/properties/${propertyId}/valuations`, data);
@@ -3170,7 +4627,7 @@ async function valuationView({ id }) {
             editBtn.onclick = () => {
                 showFormModal({
                     title: 'Edit Valuation',
-                    fields: VALUATION_FIELDS,
+                    fields: buildValuationFields(property ? property.property_type : ''),
                     wide: true,
                     initialValues: valuation,
                     onSubmit: async (data, overlay) => {
@@ -3219,7 +4676,7 @@ async function valuationView({ id }) {
                 exportBtn.textContent = 'Exporting...';
                 exportBtn.disabled = true;
                 try {
-                    const res = await fetch(`/api/v1/valuations/${id}/reports/rent-roll.xlsx`);
+                    const res = await fetch(`${API}/valuations/${id}/reports/rent-roll.xlsx`);
                     if (!res.ok) {
                         const text = await res.text().catch(() => '');
                         throw new Error(`Export failed (${res.status}) ${text}`);
@@ -3256,10 +4713,11 @@ async function valuationView({ id }) {
         }
     }
 
+    const isMultifamilyVal = property && (property.property_type === 'multifamily' || property.property_type === 'self_storage');
     const actionButtons = `
         <div class="property-header-actions">
             <button class="btn btn-secondary btn-sm" id="valExportRentRollBtn">Export Rent Roll (Excel)</button>
-            <button class="btn btn-secondary btn-sm" id="valAuditBtn">Tenant Recovery Audit</button>
+            ${isMultifamilyVal ? '' : '<button class="btn btn-secondary btn-sm" id="valAuditBtn">Tenant Recovery Audit</button>'}
             <button class="btn btn-secondary btn-sm" id="valEditBtn">${icons.edit} Edit</button>
             <button class="btn btn-primary btn-sm" id="valRunBtn">${fullReport && fullReport.key_metrics ? 'Re-run' : 'Run Valuation'}</button>
             <button class="btn btn-danger btn-sm" id="valDeleteBtn">${icons.trash} Delete</button>
@@ -3614,7 +5072,7 @@ function renderCashFlowTable(cashFlows, tenants, mktProfiles, areaUnit) {
 
     const header = `<tr>
         <th>Line Item</th>
-        ${cashFlows.map(cf => `<th class="right">Year ${cf.year}</th>`).join('')}
+        ${cashFlows.map(cf => `<th class="right" title="${fiscalYearRangeLabel(cf)}">${fiscalYearLabel(cf)}</th>`).join('')}
     </tr>`;
 
     const row = (label, field, cls = '') => `<tr class="${cls}">
@@ -3787,7 +5245,7 @@ function renderNOIChart(cf) {
     new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: cf.map(c => `Yr ${c.year}`),
+            labels: cf.map(c => fiscalYearLabel(c)),
             datasets: [{
                 data: cf.map(c => parseFloat(c.net_operating_income)),
                 backgroundColor: 'rgba(0, 113, 227, 0.65)',
@@ -3823,7 +5281,7 @@ function renderCFBDChart(cf) {
     new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: cf.map(c => `Yr ${c.year}`),
+            labels: cf.map(c => fiscalYearLabel(c)),
             datasets: [{
                 data: cf.map(c => parseFloat(c.cash_flow_before_debt)),
                 backgroundColor: cf.map(c => parseFloat(c.cash_flow_before_debt) >= 0
@@ -3862,7 +5320,7 @@ function renderExpirationChart(expirations) {
     new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: expirations.map(e => e.year.toString()),
+            labels: expirations.map(e => `Year ${e.year}`),
             datasets: [{
                 label: 'Expiring Area (SF)',
                 data: expirations.map(e => parseFloat(e.expiring_area)),

@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class MarketLeasingProfileBase(BaseModel):
@@ -33,6 +33,26 @@ class MarketLeasingProfileBase(BaseModel):
     # Structural vacancy
     general_vacancy_pct: Decimal = Field(default=Decimal("0.05"), ge=0, le=1)
     credit_loss_pct: Decimal = Field(default=Decimal("0.01"), ge=0, le=1)
+
+    # Unit-type concession timing controls (multifamily/self-storage)
+    concession_timing_mode: str = Field(
+        default="blended",
+        description="Concession timing mode: blended or timed.",
+    )
+    concession_year1_months: Decimal | None = Field(default=None, ge=0, le=12)
+    concession_year2_months: Decimal | None = Field(default=None, ge=0, le=12)
+    concession_year3_months: Decimal | None = Field(default=None, ge=0, le=12)
+    concession_year4_months: Decimal | None = Field(default=None, ge=0, le=12)
+    concession_year5_months: Decimal | None = Field(default=None, ge=0, le=12)
+    concession_stabilized_months: Decimal | None = Field(default=None, ge=0, le=12)
+
+    @model_validator(mode="after")
+    def validate_concession_mode(self) -> "MarketLeasingProfileBase":
+        mode = (self.concession_timing_mode or "blended").lower().strip()
+        if mode not in {"blended", "timed"}:
+            raise ValueError("concession_timing_mode must be 'blended' or 'timed'")
+        self.concession_timing_mode = mode
+        return self
 
 
 class MarketLeasingProfileCreate(MarketLeasingProfileBase):
@@ -78,6 +98,23 @@ class MarketLeasingProfileUpdate(BaseModel):
     renewal_rent_adjustment_pct: Decimal | None = Field(default=None, ge=-1, le=1)
     general_vacancy_pct: Decimal | None = Field(default=None, ge=0, le=1)
     credit_loss_pct: Decimal | None = Field(default=None, ge=0, le=1)
+    concession_timing_mode: str | None = None
+    concession_year1_months: Decimal | None = Field(default=None, ge=0, le=12)
+    concession_year2_months: Decimal | None = Field(default=None, ge=0, le=12)
+    concession_year3_months: Decimal | None = Field(default=None, ge=0, le=12)
+    concession_year4_months: Decimal | None = Field(default=None, ge=0, le=12)
+    concession_year5_months: Decimal | None = Field(default=None, ge=0, le=12)
+    concession_stabilized_months: Decimal | None = Field(default=None, ge=0, le=12)
+
+    @model_validator(mode="after")
+    def validate_concession_mode(self) -> "MarketLeasingProfileUpdate":
+        if self.concession_timing_mode is None:
+            return self
+        mode = self.concession_timing_mode.lower().strip()
+        if mode not in {"blended", "timed"}:
+            raise ValueError("concession_timing_mode must be 'blended' or 'timed'")
+        self.concession_timing_mode = mode
+        return self
 
 
 class MarketLeasingProfileRead(MarketLeasingProfileBase):
