@@ -25,19 +25,19 @@ class MarketLeasingProfile(Base, UUIDPrimaryKey, TimestampMixin):
 
     # New tenant assumptions
     new_lease_term_months: Mapped[int] = mapped_column(Integer, default=60)
-    new_tenant_ti_per_sf: Mapped[Decimal] = mapped_column(Numeric(18, 6), default=0)
-    new_tenant_lc_pct: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=0)  # of total lease value
+    new_tenant_ti_per_sf: Mapped[Decimal] = mapped_column(Numeric(18, 6), default=Decimal("0"))
+    new_tenant_lc_pct: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal("0.06"))  # of total lease value
     new_tenant_free_rent_months: Mapped[int] = mapped_column(Integer, default=0)
     downtime_months: Mapped[int] = mapped_column(Integer, default=3)
 
     # Renewal assumptions
     renewal_probability: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal("0.65"))
     renewal_lease_term_months: Mapped[int] = mapped_column(Integer, default=60)
-    renewal_ti_per_sf: Mapped[Decimal] = mapped_column(Numeric(18, 6), default=0)
-    renewal_lc_pct: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=0)
+    renewal_ti_per_sf: Mapped[Decimal] = mapped_column(Numeric(18, 6), default=Decimal("0"))
+    renewal_lc_pct: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal("0.03"))
     renewal_free_rent_months: Mapped[int] = mapped_column(Integer, default=0)
     renewal_rent_adjustment_pct: Mapped[Decimal] = mapped_column(
-        Numeric(10, 6), default=0
+        Numeric(10, 6), default=Decimal("0")
     )  # vs market, e.g. -0.05 = 5% below market
 
     # Structural vacancy

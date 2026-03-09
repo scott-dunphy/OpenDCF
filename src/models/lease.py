@@ -38,7 +38,7 @@ class Lease(Base, UUIDPrimaryKey, TimestampMixin):
 
     # Base rent — $/SF/year for commercial, $/unit/month for multifamily/storage
     base_rent_per_unit: Mapped[Decimal] = mapped_column(Numeric(18, 6))
-    rent_payment_frequency: Mapped[str] = mapped_column(String(20), default="monthly")
+    rent_payment_frequency: Mapped[str] = mapped_column(String(20), default="annual")
 
     # Escalation
     escalation_type: Mapped[str] = mapped_column(String(30), default=EscalationType.FLAT.value)

@@ -237,6 +237,13 @@ async def bulk_update_leases(
                 "status_code": exc.status_code,
                 "detail": str(exc.detail),
             })
+        except Exception as exc:
+            await db.rollback()
+            failures.append({
+                "lease_id": item.lease_id,
+                "status_code": 500,
+                "detail": str(exc),
+            })
         return LeaseBulkUpdateResponse(updated_count=updated_count, failed=failures)
 
     for item in body.updates:
@@ -251,6 +258,13 @@ async def bulk_update_leases(
                 "lease_id": item.lease_id,
                 "status_code": exc.status_code,
                 "detail": str(exc.detail),
+            })
+        except Exception as exc:
+            await db.rollback()
+            failures.append({
+                "lease_id": item.lease_id,
+                "status_code": 500,
+                "detail": str(exc),
             })
 
     return LeaseBulkUpdateResponse(updated_count=updated_count, failed=failures)
@@ -283,6 +297,14 @@ async def bulk_upsert_expense_recovery_overrides(
                 "status_code": exc.status_code,
                 "detail": str(exc.detail),
             })
+        except Exception as exc:
+            await db.rollback()
+            failures.append({
+                "lease_id": item.lease_id,
+                "override_id": item.override_id,
+                "status_code": 500,
+                "detail": str(exc),
+            })
         return LeaseExpenseRecoveryBulkUpsertResponse(upserted_count=upserted_count, failed=failures)
 
     for item in body.updates:
@@ -302,6 +324,14 @@ async def bulk_upsert_expense_recovery_overrides(
                 "override_id": item.override_id,
                 "status_code": exc.status_code,
                 "detail": str(exc.detail),
+            })
+        except Exception as exc:
+            await db.rollback()
+            failures.append({
+                "lease_id": item.lease_id,
+                "override_id": item.override_id,
+                "status_code": 500,
+                "detail": str(exc),
             })
 
     return LeaseExpenseRecoveryBulkUpsertResponse(upserted_count=upserted_count, failed=failures)

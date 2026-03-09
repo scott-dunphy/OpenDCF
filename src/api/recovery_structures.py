@@ -108,8 +108,10 @@ async def update_recovery_structure(
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(rs, field, value.value if hasattr(value, 'value') else value)
     await db.commit()
-    await db.refresh(rs)
-    return rs
+    result = await db.execute(
+        select(RecoveryStructure).where(RecoveryStructure.id == rs_id).options(*_rs_options())
+    )
+    return result.scalar_one()
 
 
 @router.delete("/{property_id}/recovery-structures/{rs_id}", status_code=status.HTTP_204_NO_CONTENT)
