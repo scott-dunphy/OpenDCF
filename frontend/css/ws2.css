@@ -1,0 +1,132 @@
+/* WS2: property workspace tables. Opt-in via .dt-dense so valuation/marina/seniors tables are untouched. */
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* --- Density and statement-grade numbers --- */
+.data-table.dt-dense {
+    font-size: var(--text-table);
+    border-collapse: separate;   /* sticky cells keep their borders */
+    border-spacing: 0;
+}
+.data-table.dt-dense th,
+.data-table.dt-dense td,
+.data-table.dt-dense tfoot td {
+    box-sizing: border-box;
+    height: var(--row-h-compact);
+    padding: 4px 12px;
+    vertical-align: middle;
+}
+.data-table.dt-dense th { font-size: 0.6875rem; }
+.data-table.dt-dense td,
+.data-table.dt-dense .mono,
+.data-table.dt-dense tfoot td {
+    font-feature-settings: var(--num-font-features);
+    font-variant-numeric: tabular-nums lining-nums;
+}
+.data-table.dt-dense tfoot td { border-top: 1px solid var(--border); }
+
+/* Long tables scroll inside the wrap so the header can stick */
+.data-table-wrap.dt-scroll {
+    max-height: 70vh;
+    overflow: auto;
+}
+
+/* --- Sticky header row --- */
+.data-table.dt-dense thead th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--bg-secondary);
+}
+
+/* --- Sticky first column --- */
+.data-table.dt-dense tbody td:first-child,
+.data-table.dt-dense tfoot td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--bg);
+}
+.data-table.dt-dense thead th:first-child {
+    left: 0;
+    z-index: 4;
+}
+.data-table.dt-dense tfoot td:first-child { background: var(--bg-secondary); }
+.data-table.dt-dense tbody tr:hover td:first-child { background: var(--bg-tertiary); }
+.data-table.dt-dense thead .col-actions { z-index: 4; }
+
+/* --- Row "⋯" menu --- */
+.data-table.dt-dense .col-actions {
+    width: 1%;
+    text-align: right;
+    padding-left: 4px;
+    padding-right: 8px;
+}
+.row-menu-trigger {
+    width: 28px;
+    height: 24px;
+    font-size: 1.1rem;
+    line-height: 1;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+}
+.row-menu-trigger:hover,
+.row-menu.open .row-menu-trigger {
+    background: var(--bg-secondary);
+    color: var(--text);
+}
+/* Positioned fixed by JS so the scrolling wrap cannot clip it */
+.row-menu > .menu-list {
+    position: fixed;
+    top: auto;
+    min-width: 200px;
+    background: var(--surface-raised);
+    text-align: left;
+}
+.row-menu .menu-item { font-size: var(--text-table); padding: 6px 10px; }
+.row-menu .menu-item:focus-visible { background: var(--bg-secondary); }
+.menu-sep {
+    height: 1px;
+    margin: 4px 2px;
+    background: var(--border-light);
+}
+/* A cell with an open menu paints above later sticky cells */
+.data-table td:has(> .row-menu.open) { z-index: 6; }
+
+/* --- Inline edit (commercial rent roll) --- */
+.data-table.dt-dense td.ie-cell { cursor: text; }
+.data-table.dt-dense td.ie-cell:hover { box-shadow: inset 0 -1px 0 var(--border); }
+.data-table.dt-dense td.ie-cell:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+.data-table.dt-dense td.ie-editing { padding: 2px 4px; }
+.ie-input {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 8em;
+    height: 26px;
+    padding: 0 6px;
+    font: inherit;
+    font-feature-settings: var(--num-font-features);
+    text-align: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+}
+.ie-input:focus { outline: none; box-shadow: 0 0 0 2px var(--blue-bg); }
+.data-table.dt-dense td.ie-saving { color: var(--text-tertiary); }
+.data-table.dt-dense td.ie-saving::after { content: " saving…"; font-size: 0.75em; }
+.data-table.dt-dense td.ie-saved { background: var(--green-bg); transition: background 0.6s var(--ease); }
+.data-table.dt-dense td.ie-error { background: var(--red-bg); }

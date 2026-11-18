@@ -1,0 +1,11 @@
+{
+  "name": "opendcf-frontend-tests",
+  "private": true,
+  "description": "Unit tests for the vanilla-JS frontend (node --test + jsdom)",
+  "scripts": {
+    "test": "node --test frontend/tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}

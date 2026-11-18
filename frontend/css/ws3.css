@@ -1,0 +1,240 @@
+/* WS3: valuation page. Tokens only; no hard-coded colors. */
+
+/* --- Loading skeleton (shapes only; .skeleton* styles come from WS5) --- */
+.ws3-skeleton { display: grid; gap: 12px; }
+.ws3-skeleton-headline { height: 132px; }
+.ws3-skeleton-chart { height: 300px; }
+.ws3-skeleton-table { height: 360px; }
+
+/* --- Headline: the answer first --- */
+.ws3-headline {
+    background: var(--surface-raised);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    padding: 24px 28px 20px;
+    margin-bottom: 24px;
+}
+.ws3-headline-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.02em;
+}
+.ws3-headline-value {
+    font-size: 2.6rem;
+    line-height: 1.1;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    font-feature-settings: var(--num-font-features);
+    margin: 4px 0 6px;
+}
+.ws3-headline-sentence {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    margin: 0 0 18px;
+}
+.ws3-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 32px;
+    margin: 0;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-light);
+}
+.ws3-metric dt {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    margin-bottom: 2px;
+}
+.ws3-metric dd {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+    font-feature-settings: var(--num-font-features);
+}
+.ws3-metric-sub {
+    margin-left: 6px;
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+/* --- Cash-flow chart with series toggle --- */
+.ws3-chart-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.ws3-chart-head .chart-title { margin-bottom: 0; }
+.ws3-seg {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+.ws3-seg-btn {
+    font: inherit;
+    font-size: 0.78rem;
+    padding: 5px 12px;
+    background: var(--bg);
+    color: var(--text-secondary);
+    border: 0;
+    cursor: pointer;
+}
+.ws3-seg-btn + .ws3-seg-btn { border-left: 1px solid var(--border); }
+.ws3-seg-btn[aria-pressed="true"] {
+    background: var(--bg-secondary);
+    color: var(--text);
+    font-weight: 600;
+}
+
+/* --- What-if beside the sensitivity grid --- */
+.ws3-whatif-row {
+    display: grid;
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+    margin-bottom: 24px;
+}
+.ws3-whatif-row--single { grid-template-columns: minmax(0, 1fr); }
+.ws3-whatif-row #sensitivitySection { min-width: 0; }
+.ws3-whatif-row #sensitivitySection .section-header:first-child { margin-top: 0; }
+@media (max-width: 960px) {
+    .ws3-whatif-row { grid-template-columns: minmax(0, 1fr); }
+}
+.ws3-whatif {
+    background: var(--surface-raised);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+}
+.ws3-whatif-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.ws3-whatif-head .section-title { margin: 0; }
+.ws3-badge-unsaved {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    background: var(--amber-bg);
+    color: var(--text);
+    border: 1px solid var(--amber);
+}
+.ws3-whatif-note {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin: 6px 0 14px;
+}
+.ws3-whatif-control { margin-bottom: 14px; }
+.ws3-whatif-control-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 0.8rem;
+    margin-bottom: 4px;
+}
+.ws3-whatif-control-head label { font-weight: 600; color: var(--text); }
+.ws3-whatif-saved { color: var(--text-secondary); font-size: 0.75rem; }
+.ws3-whatif-inputs { display: flex; align-items: center; gap: 10px; }
+.ws3-whatif-inputs input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.ws3-whatif-num { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); }
+.ws3-whatif-num .form-input {
+    width: 76px;
+    padding: 4px 6px;
+    text-align: right;
+    font-feature-settings: var(--num-font-features);
+}
+.ws3-whatif-result {
+    border-top: 1px solid var(--border-light);
+    padding-top: 12px;
+    margin-bottom: 14px;
+    transition: opacity 0.12s var(--ease);
+}
+.ws3-whatif-result.is-pending { opacity: 0.6; }
+.ws3-whatif-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--text);
+    font-feature-settings: var(--num-font-features);
+}
+.ws3-whatif-sub { font-size: 0.8rem; color: var(--text-secondary); min-height: 1em; }
+.ws3-whatif-delta {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    font-feature-settings: var(--num-font-features);
+}
+.ws3-whatif-delta.ws3-up { color: var(--green); }
+.ws3-whatif-delta.ws3-down { color: var(--red); }
+.ws3-whatif-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    margin: 10px 0 0;
+    font-size: 0.8rem;
+}
+.ws3-whatif-meta dt { color: var(--text-secondary); font-size: 0.72rem; }
+.ws3-whatif-meta dd { margin: 0; font-weight: 600; color: var(--text); font-feature-settings: var(--num-font-features); }
+.ws3-whatif-actions { display: flex; justify-content: space-between; gap: 8px; }
+
+/* --- Statement-grade cash-flow table --- */
+.ws3-cf-wrap {
+    max-height: 72vh;
+    overflow: auto;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+}
+.cf-table--statement {
+    border-collapse: separate;
+    border-spacing: 0;
+    box-shadow: none;
+    border-radius: 0;
+    font-size: var(--text-table);
+    font-feature-settings: var(--num-font-features);
+    background: var(--surface-raised);
+}
+.cf-table--statement th,
+.cf-table--statement td {
+    height: var(--row-h-compact);
+    padding-top: 0;
+    padding-bottom: 0;
+    font-size: var(--text-table);
+    text-align: right;
+    font-feature-settings: var(--num-font-features);
+}
+.cf-table--statement thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+.cf-table--statement th:first-child,
+.cf-table--statement td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    text-align: left;
+    background: var(--surface-raised);
+    border-right: 1px solid var(--border-light);
+    min-width: 220px;
+}
+.cf-table--statement thead th:first-child { z-index: 3; background: var(--bg-secondary); }
+.cf-table--statement .ws3-unit { font-weight: 400; }
+.cf-table--statement td { color: var(--text); }
+.cf-table--statement .negative { color: var(--text); }
+.cf-table--statement tr.subtotal td,
+.cf-table--statement tr.total td { color: var(--text); background: var(--surface-raised); }
+.cf-table--statement tr.total td { font-weight: 700; }
+.cf-table--statement tr.rule-above td { border-top: 1px solid var(--text-secondary); }
+.cf-table--statement tr.total.rule-above td { border-top-width: 2px; }
+.cf-table--statement tr.sub-row td { height: auto; padding-top: 5px; padding-bottom: 5px; color: var(--text-secondary); }

@@ -1,0 +1,81 @@
+{
+  "schema_version": "1.0.0",
+  "sources": [
+    {
+      "id": "301-colorado-2011",
+      "filename": "301_colorado_2011_published.html",
+      "sha256": "317ca20741676f33a9e0cd6c6d74f13b21d58894125e0e2eeadd65a52e523c57",
+      "byte_size": 973276,
+      "source_url": "https://www.sec.gov/Archives/edgar/data/105729/000119312511099914/dex99c11.htm",
+      "issuer": "Wesco Financial Corporation",
+      "property_name": "301 E. Colorado Boulevard",
+      "property_type": "office",
+      "valuation_date": "2011-01-01",
+      "software_evidence": "Report states that its discounted cash flow was prepared using the published DCF software.",
+      "software_version": null,
+      "test_module": "tests/integration/test_published_appraisal_301_colorado.py",
+      "coverage": ["classification", "rent_roll", "market_leasing", "expenses", "annual_cash_flow", "reversion"]
+    },
+    {
+      "id": "cedar-springs-2011",
+      "filename": "cedar_springs_2011_published_v14.pdf",
+      "sha256": "a6a123d4ef40f3a383bdf58591dcc98a82ac0782339c352ab9f5069aa6744b45",
+      "byte_size": 5877311,
+      "source_url": "https://www.sec.gov/Archives/edgar/data/728478/000109690611002287/ex16e.pdf",
+      "issuer": "Income Opportunity Realty Investors, Inc.",
+      "property_name": "4211 Cedar Springs",
+      "property_type": "office",
+      "valuation_date": "2011-03-01",
+      "software_evidence": "DCF assumptions identify the program as the published DCF software, version 14.",
+      "software_version": "14",
+      "test_module": "tests/integration/test_published_appraisal_cedar_springs_mixed_use.py",
+      "coverage": ["pdf_classification", "rent_roll", "general_vacancy", "expenses", "discount_rate", "exit_cap_rate"]
+    },
+    {
+      "id": "cedar-springs-2012",
+      "filename": "cedar_springs_2012_published_v14.pdf",
+      "sha256": "d90d5a3ebddef48a1018c384e404ff59a6e20ba725e581f54d5cc3540a451729",
+      "byte_size": 4508875,
+      "source_url": "https://www.sec.gov/Archives/edgar/data/316028/000109690612003049/exh16e.pdf",
+      "issuer": "Transcontinental Realty Investors, Inc.",
+      "property_name": "4211 Cedar Springs",
+      "property_type": "office",
+      "valuation_date": "2012-12-01",
+      "software_evidence": "DCF assumptions identify the program as the published DCF software, version 14.",
+      "software_version": "14",
+      "test_module": "tests/integration/test_published_appraisal_cedar_springs_mixed_use.py",
+      "coverage": ["pdf_classification", "repeat_appraisal", "staleness", "assumption_change", "valuation_comparison"]
+    },
+    {
+      "id": "ccpt-net-lease-portfolio-2014",
+      "filename": "ccpt_net_lease_portfolio_2014_published_v15.html",
+      "sha256": "07505d6d88ae9e198d925f76319826a04837db0e5193ab4ba62bab7c5ae21e67",
+      "byte_size": 658941,
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1507385/000114420414022249/v374525_ex99ciii.htm",
+      "issuer": "Cole Real Estate Investments",
+      "property_name": "Net lease appraisal portfolio",
+      "property_type": "retail",
+      "valuation_date": "2014-01-01",
+      "software_evidence": "DCF assumptions identify the published DCF software, version 15.0.1.26.",
+      "software_version": "15.0.1.26",
+      "test_module": "tests/integration/test_published_appraisal_ccpt_net_lease.py",
+      "coverage": ["portfolio_document", "multiple_properties", "net_lease", "rent_steps", "recoveries", "annual_cash_flow"]
+    },
+    {
+      "id": "magnolia-city-place-2014",
+      "filename": "magnolia_city_place_2014_published_v15.html",
+      "sha256": "7696d37152b63c65c1a79dcaf83a3f46309ab61beaaab2382e4d101cc846fa4c",
+      "byte_size": 3905216,
+      "source_url": "https://www.sec.gov/Archives/edgar/data/891919/000119312515349412/d22203dex16c7.htm",
+      "issuer": "Inland Real Estate Corporation",
+      "property_name": "Magnolia City Place / Northgate Shopping Center",
+      "property_type": "retail",
+      "valuation_date": "2014-02-01",
+      "software_evidence": "The report and addendum identify the published DCF software, version 15.0.1.26 and include published-software rent-roll and supporting schedules.",
+      "software_version": "15.0.1.26",
+      "test_module": "tests/integration/test_published_appraisal_magnolia.py",
+      "coverage": ["classification", "published_software_schedules", "rent_roll", "absorption", "tenant_improvements", "leasing_commissions", "reimbursements"]
+    }
+  ]
+}
+

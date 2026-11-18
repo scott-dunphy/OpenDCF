@@ -1,0 +1,28 @@
+.venv/
+.idea/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.env
+*.db
+*.db.backup
+*.sqlite3
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+.claude/skills/*.zip
+data/
+
+# Census reference data shipped with the app (assumptions library)
+!src/data/
+node_modules/
+
+# Local agent instructions; not published
+CLAUDE.md
+.claude/skills/

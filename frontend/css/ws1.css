@@ -1,0 +1,20 @@
+/* WS1 foundation: focus ring and dialog focus (tokens live in style.css :root) */
+
+/* One visible keyboard focus ring for every control. Text fields (.form-input) keep their
+   accent border plus --focus-halo ring from style.css. */
+:where(a[href], button, input, select, textarea, summary, [tabindex], [role="tab"],
+       .menu-item, .tab-item, .topnav-link, .subnav-link):focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
+/* Inside a menu the item fills the list, so draw the ring inside it */
+.menu-list .menu-item:focus-visible { outline-offset: -2px; }
+
+/* A dialog box focused because it has no controls (dialogs.js) needs no ring */
+.modal-overlay > [tabindex="-1"]:focus,
+.intake-overlay > [tabindex="-1"]:focus,
+.intake-workbench-overlay > [tabindex="-1"]:focus { outline: none; }
+
+/* The logo mark is black on transparent; flip it on the dark theme */
+:root[data-theme="dark"] .topnav-logo { filter: invert(1); }

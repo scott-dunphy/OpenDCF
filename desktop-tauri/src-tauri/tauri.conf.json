@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenDCF",
+  "version": "0.1.0",
+  "identifier": "com.opendcf.desktop",
+  "build": {
+    "beforeDevCommand": "node ./scripts/run-backend.mjs",
+    "devUrl": "http://127.0.0.1:8011",
+    "beforeBuildCommand": "node ./scripts/prepare-frontend.mjs",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OpenDCF",
+        "width": 1500,
+        "height": 960,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.icns",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ]
+  }
+}

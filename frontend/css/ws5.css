@@ -1,0 +1,53 @@
+/* WS5: skeleton placeholders shown while a page's data loads. */
+
+.skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.skeleton-line,
+.skeleton-block,
+.skeleton-row {
+    border-radius: var(--radius-sm);
+    background: linear-gradient(90deg, var(--skeleton-base) 25%, var(--skeleton-shine) 50%, var(--skeleton-base) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton-line {
+    height: 12px;
+    width: 100%;
+}
+.skeleton-line--title { height: 28px; width: 40%; }
+.skeleton-line--short { width: 25%; }
+
+.skeleton-block {
+    height: 120px;
+    border-radius: var(--radius);
+}
+
+.skeleton-row {
+    height: var(--row-h-compact);
+    border-radius: 4px;
+}
+
+.skeleton-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+@keyframes skeleton-shimmer {
+    from { background-position: 100% 0; }
+    to { background-position: -100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skeleton-line,
+    .skeleton-block,
+    .skeleton-row {
+        animation: none;
+        background: var(--skeleton-base);
+    }
+}
