@@ -104,6 +104,8 @@ class TestScenarios:
         regime = recession_years(params)
         # Long-run share of recession years q / (1 - s + q) = 0.1 / 0.5
         assert regime[:, 10:].mean() == pytest.approx(recession_share(params), abs=0.01) == pytest.approx(0.2)
+        # Stationary from year 0, not starting calm
+        assert regime[:, 0].mean() == pytest.approx(recession_share(params), abs=0.02)
         # Same recession years for every property on a path; centred, so the average path is unchanged
         a = property_deviations(params, "p1", "office", "Dallas")
         b = property_deviations(params, "p2", "retail", "Chicago")

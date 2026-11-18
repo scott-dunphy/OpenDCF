@@ -18,8 +18,10 @@ properties in layers, so properties in the same market move together:
 Recessions are an economy-wide regime (see RiskParameters): in a recession
 year every driver takes an extra shock (rents and renewals down, vacancy,
 concessions, downtime and cap rates up, rates down), centred so the average
-path is still the base case. Recession years are the same for every property
-on a path.
+driver path is still the base case. Mean value is not the base value: value is
+convex in the cap rate, so summaries report mean value against base. Recession
+years are the same for every property on a path, and the first year is drawn
+from the long-run recession share.
 
 Every draw comes from a random stream named by (seed, layer), and every path
 draws MAX_YEARS years, so a property's paths do not depend on which other
@@ -103,8 +105,9 @@ def recession_years(params: RiskParameters) -> np.ndarray:
     """Economy-wide recession indicator, paths x MAX_YEARS (1 = recession year); today is not one."""
     u = _rng(params.seed, "recession").random((params.num_paths, MAX_YEARS))
     state = np.zeros((params.num_paths, MAX_YEARS))
-    prev = np.zeros(params.num_paths, dtype=bool)
-    for y in range(MAX_YEARS):
+    prev = u[:, 0] < recession_share(params)          # first year drawn from the long-run share
+    state[:, 0] = prev
+    for y in range(1, MAX_YEARS):
         prev = np.where(prev, u[:, y] < params.recession_persistence, u[:, y] < params.recession_probability)
         state[:, y] = prev
     return state

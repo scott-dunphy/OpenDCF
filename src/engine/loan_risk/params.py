@@ -85,7 +85,8 @@ class RiskParameters:
     seed: int = 1234
 
     # Collateral scenarios: yearly deviations follow dev[y] = persistence x dev[y-1] + volatility x shock[y],
-    # with shocks correlated across drivers by driver_correlation.
+    # with shocks correlated across drivers by driver_correlation. Volatility is the yearly innovation
+    # SD; the stationary SD of a driver's deviation is volatility / sqrt(1 - persistence^2).
     driver_volatility: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_DRIVER_VOLATILITY))
     driver_persistence: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_DRIVER_PERSISTENCE))
     driver_correlation: list[list[float]] = field(default_factory=lambda: [r[:] for r in DEFAULT_DRIVER_CORRELATION])
@@ -128,9 +129,9 @@ class RiskParameters:
     # the CMM expected-loss grid in the 2013 ACLI proposal to the NAIC
     # (scripts/calibrate_default_model.py).
     # Fitted together with recession_severity (600 paths, 41 cells): typical cell within a factor of 1.4.
-    default_intercept: float = -6.60
-    default_dscr_coef: float = -0.22
-    default_ltv_coef: float = 0.81
+    default_intercept: float = -7.10
+    default_dscr_coef: float = -1.57
+    default_ltv_coef: float = 1.30
 
     # Maturity: the loan refinances if the largest new loan (LTV, DSCR, debt yield) covers it; the
     # sponsor can pay down a shortfall up to max_equity_paydown_pct of value; otherwise it extends
@@ -151,11 +152,11 @@ class RiskParameters:
     # Loss given default
     liquidation_lag_months: int = 18
     liquidation_lag_by_type: dict[str, int] = field(default_factory=lambda: {"office": 24})
-    liquidation_cost_pct: float = 0.08
+    liquidation_cost_pct: float = 0.0
     workout_cost_pct: float = 0.03      # legal, receiver and special servicing, % of balance at default
     # Carrying costs while the loan is resolved that NOI does not cover (deferred maintenance, leasing,
     # protective advances), % of collateral value at default per year of the liquidation lag
-    workout_carry_pct: float = 0.02
+    workout_carry_pct: float = 0.0
     workout_noi_to_lender_pct: float = 1.0
     advance_interest: bool = True
 

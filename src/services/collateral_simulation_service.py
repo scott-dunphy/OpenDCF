@@ -129,6 +129,7 @@ def summarize(res: PathResults, devs: np.ndarray, base_npv: float, years: int) -
         "paths": int(npv.size),
         "base_value": base_npv,
         "value": {"mean": float(npv.mean()), "std": float(npv.std()), **_pct(npv)},
+        "mean_value_minus_base": float(npv.mean() - base_npv),   # convexity in the cap rate; zero would mean no gap
         "prob_below_base": float((npv < base_npv).mean()),
         "prob_below_90pct_base": float((npv < 0.9 * base_npv).mean()),
         "histogram": {"edges": [float(e) for e in edges], "counts": [int(c) for c in counts]},
