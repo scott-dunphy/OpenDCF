@@ -33,7 +33,9 @@ from src.engine.dcf import (
     going_in_cap_rate,
     irr_from_series,
 )
-from src.engine.expense_engine import _effective_recovery_type, attach_expense_recoveries, recovery_occupancy_context
+from src.engine.expense_engine import (
+    _effective_recovery_type, _has_stop_reference, attach_expense_recoveries, recovery_occupancy_context,
+)
 from src.engine.recovery_pools import (
     deducting_pools_excluding, excluded_net_fees, excluded_recoveries, lease_pool_shares, pool_denominators, pool_occupancies,
 )
@@ -602,7 +604,7 @@ def _fee_rows(leases, expenses: list[ExpenseInput]) -> bool:
     fee_categories = {e.category for e in expenses if e.is_pct_of_egi and e.is_recoverable}
     return any(
         (recovery_type := _effective_recovery_type(lease, category)) == "modified_gross"
-        or (recovery_type == "base_year_stop" and lease.base_year is not None)
+        or (recovery_type == "base_year_stop" and _has_stop_reference(lease, category))
         for lease in leases for category in fee_categories)
 
 
@@ -614,7 +616,8 @@ def _fee_in_growth_cap(leases, expenses: list[ExpenseInput]) -> bool:
     for lease in leases:
         for category in fee_categories:
             recovery_type = _effective_recovery_type(lease, category)
-            if recovery_type == "modified_gross" or (recovery_type == "base_year_stop" and lease.base_year is not None):
+            if recovery_type == "modified_gross" or (
+                    recovery_type == "base_year_stop" and _has_stop_reference(lease, category)):
                 return True
         groups: dict[str, list] = {}
         for o in lease.recovery_overrides:

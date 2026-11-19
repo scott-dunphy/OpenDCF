@@ -148,6 +148,15 @@ def _effective_recovery_type(lease: LeaseInput, expense_category: str) -> str:
     return override.recovery_type if override else lease.recovery_type
 
 
+def _has_stop_reference(lease: LeaseInput, expense_category: str) -> bool:
+    """Whether a base-year stop line has a stop to measure against: a base-year date, or an explicit
+    stop amount on the lease or on the category's override."""
+    if lease.base_year is not None or lease.base_year_stop_amount is not None:
+        return True
+    override = next((o for o in lease.recovery_overrides if o.expense_category == expense_category), None)
+    return override is not None and override.base_year_stop_amount is not None
+
+
 def _leaves_pool(lease: LeaseInput, override: ExpenseRecoveryOverride | None) -> bool:
     """Whether a per-category override takes its line out of the lease's pooled stop (modified gross
     or base year): it sets its own stop or a different recovery type. An item that only adds an
@@ -696,11 +705,13 @@ def attach_expense_recoveries(
                             lease.pro_rata_share if lease.pro_rata_share is not None
                             else lease.area / denom if denom > 0 else Decimal(0)) * (Decimal(1) + admin)
                     continue
-                if fee_type == "base_year_stop" and fee_by_year and lease.base_year is not None:
-                    # The fee's increase over the base year, once the fee by year is known
+                if fee_type == "base_year_stop" and fee_by_year and _has_stop_reference(lease, exp.category):
+                    # The fee's increase over the base year, once the fee by year is known. Without a
+                    # base-year date the explicit stop amount sets the stop; year 1 is the reference.
                     fee = fee_in(exp, key, actual_occupancy)
-                    base_key = (lease.base_year if calendar_year_recoveries
-                                else lease.base_year - analysis.start_date.year + 1)
+                    base_year = lease.base_year if lease.base_year is not None else analysis.start_date.year
+                    base_key = (base_year if calendar_year_recoveries
+                                else base_year - analysis.start_date.year + 1)
                     base_fee = fee_in(exp, base_key, occupancy_in(base_key))
                     rec, meta = _recovery_for_expense(
                         lease, exp, fee, denominator(exp, key), year_number, analysis.start_date.year,

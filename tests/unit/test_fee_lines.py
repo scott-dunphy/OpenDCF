@@ -211,6 +211,16 @@ class TestFeeOverBaseYear:
         assert _recoveries(net, fee_only) == pytest.approx(_recoveries(whole, fee_only), rel=D("1e-9"))
         assert _recoveries(net, fee_only)[1] > D(2500)
 
+    def test_explicit_stop_without_base_year_recovers_the_fee(self):
+        # An explicit stop amount sets the stop, so a missing base-year date must not drop the fee line
+        stop = D(100000)
+        dated = self._stepped(recovery_type="base_year_stop", base_year=2025, base_year_stop_amount=stop)
+        undated = self._stepped(recovery_type="base_year_stop", base_year_stop_amount=stop)
+        expenses = [TAXES, _fee()]
+        assert _recoveries(undated, expenses) == pytest.approx(_recoveries(dated, expenses), rel=D("1e-9"))
+        fee_not_recovered = [TAXES, replace(_fee(), is_recoverable=False)]
+        assert _recoveries(undated, expenses)[1] > _recoveries(undated, fee_not_recovered)[1]
+
     def test_base_year_before_the_analysis_estimates_the_base_fee(self):
         # fees-6: a 2024 base year: the 2024 fee is the 2025 fee moved with the other expenses (taxes, 3%)
         lease = _flat_lease(recovery_type="base_year_stop", base_year=2024)
