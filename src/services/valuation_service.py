@@ -1182,6 +1182,7 @@ class ValuationService:
             reduce_general_vacancy_by_downtime=bool(v.reduce_general_vacancy_by_downtime),
             vacancy_calculation_frequency=v.vacancy_calculation_frequency or "annual",
             vacancy_on_gross_revenue=bool(v.vacancy_on_gross_revenue),
+            credit_loss_on_tenant_revenue=bool(v.credit_loss_on_tenant_revenue),
             calendar_year_recoveries=bool(v.calendar_year_recoveries),
             exit_noi_full_occupancy=bool(v.exit_noi_full_occupancy),
             exit_stabilized_vacancy_pct=v.exit_stabilized_vacancy_pct or Decimal(0),

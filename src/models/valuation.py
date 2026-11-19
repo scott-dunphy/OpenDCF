@@ -60,6 +60,8 @@ class Valuation(Base, UUIDPrimaryKey, TimestampMixin):
     vacancy_calculation_frequency: Mapped[str] = mapped_column(String(16), default="annual")
     # General vacancy and credit loss on gross revenue (rent + recoveries + other) instead of rent
     vacancy_on_gross_revenue: Mapped[bool] = mapped_column(default=False)
+    # Credit loss on tenant revenue (rent, recoveries, percentage rent), not other income
+    credit_loss_on_tenant_revenue: Mapped[bool] = mapped_column(default=False)
     # Recoveries billed on calendar years (expenses inflated on fiscal years)
     calendar_year_recoveries: Mapped[bool] = mapped_column(default=False)
     # Reversion NOI adjusted for full occupancy at the stabilized vacancy rate (published DCF software)

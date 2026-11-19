@@ -346,7 +346,12 @@ def build_annual_waterfall(
                 gen_vac_loss = -max(Decimal(0), (vacancy_base + modeled_vac) * gen_vac_rate - modeled_vac)
             else:
                 gen_vac_loss = -(vacancy_base * gen_vac_rate)
-            credit_loss = -(vacancy_base * credit_loss_rate)
+            if params.credit_loss_on_tenant_revenue:
+                credit_base = (scheduled_rent - excluded_gpr - excluded_free_rent + recoveries - excluded_recoveries
+                               + mgmt_recovery - excluded_mgmt + pct_rent)
+            else:
+                credit_base = vacancy_base
+            credit_loss = -(credit_base * credit_loss_rate)
             return gpi, gen_vac_loss, credit_loss, gpi + gen_vac_loss + credit_loss
 
         # Tenants reimbursing the management fee raise EGI, which raises the fee: iterate to

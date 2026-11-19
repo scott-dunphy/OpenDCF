@@ -88,6 +88,11 @@ class ValuationBase(BaseModel):
         description="Apply general vacancy and credit loss to gross revenue (rent, recoveries, other income) "
                     "instead of rent only, as published DCF software does by default.",
     )
+    credit_loss_on_tenant_revenue: bool = Field(
+        default=False,
+        description="Apply credit loss to tenant revenue (rent after free rent, recoveries, percentage rent) "
+                    "instead of the general vacancy base, leaving out other income.",
+    )
     calendar_year_recoveries: bool = Field(
         default=False,
         description="Bill recoveries on calendar years while expenses inflate on fiscal years (published DCF software).",
@@ -197,6 +202,7 @@ class ValuationUpdate(BaseModel):
     reduce_general_vacancy_by_downtime: bool | None = None
     vacancy_calculation_frequency: Literal["annual", "monthly"] | None = None
     vacancy_on_gross_revenue: bool | None = None
+    credit_loss_on_tenant_revenue: bool | None = None
     calendar_year_recoveries: bool | None = None
     exit_noi_full_occupancy: bool | None = None
     exit_stabilized_vacancy_pct: Decimal | None = Field(default=None, ge=0, le=1)

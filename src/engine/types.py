@@ -318,6 +318,9 @@ class ValuationParams:
     # General vacancy and credit loss apply to gross revenue (rent, recoveries, percentage rent
     # and other income) instead of rent only
     vacancy_on_gross_revenue: bool = False
+    # Credit loss applies to tenant revenue (rent after free rent, recoveries and percentage rent),
+    # not other income; general vacancy keeps its base
+    credit_loss_on_tenant_revenue: bool = False
     # Tenants reimburse each calendar year's expenses (published DCF software calendar reimbursement), not the
     # analysis year's; differs only when the analysis year does not end in December
     calendar_year_recoveries: bool = False

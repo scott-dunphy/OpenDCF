@@ -87,6 +87,62 @@ class TestVacancyOnGrossRevenue:
         assert gross.credit_loss == pytest.approx(D(-4000)) and gross.general_vacancy_loss == pytest.approx(D(-20000))
 
 
+class TestCreditLossOnTenantRevenue:
+    """Credit loss on tenant revenue (rent, recoveries, percentage rent), not miscellaneous income;
+    general vacancy keeps its own base. $300,000 rent, $100,000 recovered, $50,000 other income;
+    5% general vacancy, 1% credit loss."""
+
+    def _run(self, leases, suites, **params):
+        return run_valuation(
+            property_start_date=date(2025, 1, 1), analysis_period_months=60, fiscal_year_end_month=12,
+            suites=suites, leases=leases, market_assumptions={"office": _make_market()},
+            expenses=[_expense(is_recoverable=True)], other_income_annual=D(50000),
+            params=replace(_make_params(), **params),
+        ).annual_cash_flows[0]
+
+    def _one_tenant(self, **params):
+        suite = SuiteInput(suite_id="S1", suite_name="100", area=D("10000"), space_type="office")
+        return self._run([_flat_lease(recovery_type="nnn")], [suite], **params)
+
+    def test_flag_off_unchanged(self):
+        rent_only = self._one_tenant()
+        assert rent_only.credit_loss == D(-3000) and rent_only.general_vacancy_loss == D(-15000)
+        gross = self._one_tenant(vacancy_on_gross_revenue=True)
+        assert gross.credit_loss == pytest.approx(D(-4500))
+        assert gross.general_vacancy_loss == pytest.approx(D(-22500))
+
+    @pytest.mark.parametrize("on_gross, vacancy", [(False, D(-15000)), (True, D(-22500))])
+    def test_excludes_other_income(self, on_gross, vacancy):
+        cf = self._one_tenant(credit_loss_on_tenant_revenue=True, vacancy_on_gross_revenue=on_gross)
+        assert cf.credit_loss == pytest.approx(D(-4000))
+        assert cf.general_vacancy_loss == pytest.approx(vacancy)
+
+    @pytest.mark.parametrize("on_gross", [False, True])
+    def test_excludes_credit_tenant(self, on_gross):
+        # Two 10,000 SF NNN tenants at $30 sharing $100,000 of taxes; the second is a credit tenant
+        suites = [SuiteInput(suite_id=s, suite_name=s, area=D("10000"), space_type="office") for s in ("S1", "S2")]
+        leases = [_flat_lease(recovery_type="nnn"),
+                  _flat_lease(lease_id="L2", suite_id="S2", recovery_type="nnn", exclude_from_general_vacancy=True)]
+        cf = self._run(leases, suites, total_property_area=D(20000), credit_loss_on_tenant_revenue=True,
+                       vacancy_on_gross_revenue=on_gross)
+        assert cf.credit_loss == pytest.approx(D(-3500))
+
+    def test_reimbursed_management_fee_converges(self):
+        # The fee is 2% of an EGI that is net of credit loss on the reimbursed fee itself
+        suite = SuiteInput(suite_id="S1", suite_name="100", area=D("10000"), space_type="office")
+        mgmt = _expense(expense_id="M", category="management_fee", base_amount=D(0), growth_rate=D(0),
+                        is_recoverable=True, is_pct_of_egi=True, pct_of_egi=D("0.02"))
+        cf = run_valuation(
+            property_start_date=date(2025, 1, 1), analysis_period_months=60, fiscal_year_end_month=12,
+            suites=[suite], leases=[_flat_lease(recovery_type="nnn")], market_assumptions={"office": _make_market()},
+            expenses=[_expense(is_recoverable=True), mgmt], other_income_annual=D(50000),
+            params=replace(_make_params(), credit_loss_on_tenant_revenue=True),
+        ).annual_cash_flows[0]
+        assert -cf.expense_detail["management_fee"] == pytest.approx(cf.effective_gross_income * D("0.02"))
+        assert cf.expense_recoveries > D(100000)
+        assert cf.credit_loss == pytest.approx(-(D(300000) + cf.expense_recoveries) * D("0.01"))
+
+
 class TestBlendedRollover:
     def test_one_lease_with_weighted_terms(self):
         # Expiry Dec 2026: 65% renewal; new tenant 6 months down, $50 TI, 3 months free; renewal $20 TI, 1 month
