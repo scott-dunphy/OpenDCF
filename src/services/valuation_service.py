@@ -1076,6 +1076,7 @@ class ValuationService:
             leasing_cost_growth_rate=m.leasing_cost_growth_rate or Decimal(0),
             rollover_method=m.rollover_method or "probability_tree",
             renewal_rent_rule=m.renewal_rent_rule or "market",
+            round_start_to_month=bool(m.round_start_to_month),
             lease_escalation_pct=m.lease_escalation_pct,
             lc_includes_escalations=m.lc_includes_escalations is not False,
             new_lc_pct_by_lease_year=tuple(m.new_tenant_lc_pct_by_lease_year or ()),

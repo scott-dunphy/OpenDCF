@@ -1261,6 +1261,15 @@ class TestYearByYearMarketAndAmountSchedulesApi:
             "renewal_rent_rule": "prior"})
         assert bad.status_code == 422
 
+    async def test_round_start_to_month(self, client: AsyncClient):
+        val_id, mp_id = await self._model(client)
+        mp = (await client.get(f"/api/v1/valuations/{val_id}/market-profiles")).json()[0]
+        assert mp["round_start_to_month"] is False
+        upd = await client.put(f"/api/v1/valuations/{val_id}/market-profiles/{mp_id}", json={
+            "round_start_to_month": True})
+        assert upd.status_code == 200 and upd.json()["round_start_to_month"] is True
+        assert (await client.post(f"/api/v1/valuations/{val_id}/run")).status_code == 200
+
     async def test_expense_and_other_income_amount_schedules(self, client: AsyncClient):
         val_id, _ = await self._model(client)
         exp = await client.post(f"/api/v1/valuations/{val_id}/expenses", json={

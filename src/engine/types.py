@@ -235,6 +235,9 @@ class MarketAssumptions:
     # Renewal rent: "market" (market rent x (1 + renewal adjustment)), or the greater / lesser of
     # that and the expiring lease's last contract rent ("greater_of_prior" / "lesser_of_prior")
     renewal_rent_rule: str = "market"
+    # Market leases starting mid-month after downtime start on the 1st of the next month instead;
+    # the extra days stay vacant. Renewals in the probability tree (no downtime) are not moved.
+    round_start_to_month: bool = False
     # Rent increases at given months of a market lease, on top of the annual escalation:
     # ((61, 0.10),) = up 10% from lease month 61 (published DCF software changing base rent)
     lease_rent_steps: tuple[tuple[int, Decimal], ...] = ()

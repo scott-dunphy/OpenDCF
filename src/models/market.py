@@ -64,6 +64,8 @@ class MarketLeasingProfile(Base, UUIDPrimaryKey, TimestampMixin):
     rollover_method: Mapped[str] = mapped_column(String(20), default="probability_tree")
     # market | greater_of_prior | lesser_of_prior: renewal rent vs the expiring lease's last rent
     renewal_rent_rule: Mapped[str] = mapped_column(String(20), default="market", server_default="market")
+    # Mid-month market lease starts after downtime move to the 1st of the next month
+    round_start_to_month: Mapped[bool] = mapped_column(default=False)
     # Annual increase on market leases; None = market rent growth in the year the lease starts
     lease_escalation_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     # Fixed annual increase on market leases, $/SF (or $/unit); replaces lease_escalation_pct when set

@@ -51,6 +51,11 @@ class MarketLeasingProfileBase(BaseModel):
         description="Renewal rent: market (x renewal adjustment), or the greater / lesser of that and the "
                     "expiring lease's last contract rent (steps and escalations included, free rent ignored)",
     )
+    round_start_to_month: bool = Field(
+        default=False,
+        description="Market leases that would start mid-month after downtime start on the 1st of the next "
+                    "month; the extra days stay vacant. Probability-tree renewals (no downtime) are not moved.",
+    )
     rollover_method: Literal["probability_tree", "blended"] = Field(
         default="probability_tree",
         description="probability_tree: renewal and new tenant modeled as weighted branches. blended: one "
@@ -179,6 +184,7 @@ class MarketLeasingProfileUpdate(BaseModel):
     leasing_cost_growth_rate: Decimal | None = Field(default=None, ge=-1, le=1)
     rollover_method: Literal["probability_tree", "blended"] | None = None
     renewal_rent_rule: Literal["market", "greater_of_prior", "lesser_of_prior"] | None = None
+    round_start_to_month: bool | None = None
     lease_escalation_pct: Decimal | None = Field(default=None, ge=-1, le=1)
     lease_escalation_per_unit: Decimal | None = Field(default=None, ge=0)
     lc_includes_escalations: bool | None = None

@@ -354,6 +354,13 @@ def _next_prior(lease: LeaseInput, end_raw: date, market: MarketAssumptions, are
     return prior_rent_in_market_units(lease, last_contract_rent(lease, end_raw, cpi_assumption), market, area)
 
 
+def _round_start(market: MarketAssumptions, start: date) -> date:
+    """A mid-month market lease start moves to the 1st of the next month when the profile says so."""
+    if not market.round_start_to_month or start.day == 1:
+        return start
+    return end_of_month(start) + timedelta(days=1)
+
+
 def _leasing_cost_factor(market: MarketAssumptions, analysis: AnalysisPeriod, start_date: date) -> Decimal:
     """Growth of TI and LC $/SF from Year 1 to the analysis year the lease starts."""
     return growth_factor_to_year(
@@ -518,10 +525,10 @@ def generate_speculative_leases(
             int(rate_for_year(market.downtime_months, market.downtime_schedule, expiry_year))
             if downtime_months_override is None else downtime_months_override
         )
-        new_tenant_start = add_months(vacancy_start_date, downtime)
+        new_tenant_start = _round_start(market, add_months(vacancy_start_date, downtime))
 
         # Vacancy slices during downtime
-        if downtime > 0 and vacancy_start_date < new_tenant_start:
+        if vacancy_start_date < new_tenant_start:
             downtime_end = min(new_tenant_start - timedelta(days=1), analysis.end_date)
             vacancy_slices = make_vacant_slices(
                 suite_id=suite.suite_id,
@@ -641,9 +648,9 @@ def _blended_rollover(
         downtime = whole_months(0, int(rate_for_year(market.downtime_months, market.downtime_schedule, expiry_year)))
     else:
         downtime = downtime_months_override
-    start_raw = add_months(vacancy_start_date, downtime)
+    start_raw = _round_start(market, add_months(vacancy_start_date, downtime))
     slices: list[MonthlySlice] = []
-    if downtime > 0:
+    if start_raw > vacancy_start_date:
         slices.extend(make_vacant_slices(
             suite_id=suite.suite_id,
             start_date=vacancy_start_date,
