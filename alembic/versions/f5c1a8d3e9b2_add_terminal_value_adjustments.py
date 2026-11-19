@@ -1,14 +1,14 @@
 """Add terminal value adjustments: free rent addback / deduction, forward TI/LC, exit costs on adjusted gross
 
 Revision ID: f5c1a8d3e9b2
-Revises: e2b7d5a9c3f6
+Revises: b8e3f1a6d742
 Create Date: 2026-11-18
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = "f5c1a8d3e9b2"
-down_revision = "e2b7d5a9c3f6"
+down_revision = "b8e3f1a6d742"
 branch_labels = None
 depends_on = None
 

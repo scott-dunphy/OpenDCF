@@ -1,14 +1,14 @@
 """Add memo flag to operating expenses (recoverable, not an operating expense)
 
 Revision ID: f3c8a1d6e2b4
-Revises: e2b7d5a9c3f6
+Revises: f3c8a1d6b2e4
 Create Date: 2026-11-18
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = "f3c8a1d6e2b4"
-down_revision = "e2b7d5a9c3f6"
+down_revision = "f3c8a1d6b2e4"
 branch_labels = None
 depends_on = None
 

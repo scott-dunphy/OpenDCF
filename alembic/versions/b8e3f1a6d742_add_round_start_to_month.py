@@ -1,14 +1,14 @@
 """Add round_start_to_month (market lease starts after downtime move to the 1st) to market leasing profiles
 
 Revision ID: b8e3f1a6d742
-Revises: e2b7d5a9c3f6
+Revises: f3c8a1d6b294
 Create Date: 2026-11-18
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = "b8e3f1a6d742"
-down_revision = "e2b7d5a9c3f6"
+down_revision = "f3c8a1d6b294"
 branch_labels = None
 depends_on = None
 
