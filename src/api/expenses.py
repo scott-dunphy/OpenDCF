@@ -86,6 +86,8 @@ async def update_expense(
         raise HTTPException(status_code=404, detail="Expense not found")
     for field, value in update_changes(PropertyExpense, body).items():
         setattr(expense, field, value)
+    if expense.is_memo and expense.is_pct_of_egi:
+        raise HTTPException(status_code=422, detail="A % of EGI line cannot be a memo line")
     await db.commit()
     await db.refresh(expense)
     return expense

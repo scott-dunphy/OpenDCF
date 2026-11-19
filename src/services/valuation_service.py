@@ -1124,6 +1124,7 @@ class ValuationService:
             growth_schedule=tuple(e.growth_schedule or ()),
             variable_pct=e.variable_pct or Decimal(0),
             amount_schedule=amount_schedule,
+            is_memo=e.is_memo,
         )
 
     def _to_other_income_input(self, oi) -> OtherIncomeInput:

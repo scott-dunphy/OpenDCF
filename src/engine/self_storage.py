@@ -176,7 +176,7 @@ def _monthly_rows(
 ) -> list[AnnualPropertyCashFlow]:
     rentable_sf = sum((u.sf_per_unit * u.count for u in model.unit_types), ZERO)
     egi_lines = [e for e in expenses if e.is_pct_of_egi and e.pct_of_egi]
-    fixed_lines = [e for e in expenses if not e.is_pct_of_egi]
+    fixed_lines = [e for e in expenses if not e.is_pct_of_egi and not e.is_memo]
     rows = []
     for m, bucket in enumerate(buckets):
         year = bucket.year_number

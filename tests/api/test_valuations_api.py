@@ -1011,6 +1011,41 @@ class TestExpenseBasisApi:
         assert float(cf["expense_detail"]["utilities"]) == -30000.0
 
 
+class TestMemoExpenseApi:
+    async def test_memo_line_recovered_but_not_an_operating_expense(self, client: AsyncClient):
+        ids = await _setup_office_property(client)
+        prop_id = ids["property_id"]
+        body = {"name": "Base", "discount_rate": "0.08", "exit_cap_rate": "0.065"}
+        val_id = (await client.post(f"/api/v1/properties/{prop_id}/valuations", json=body)).json()["id"]
+        base_cf = (await client.post(f"/api/v1/valuations/{val_id}/run")).json()["annual_cash_flows"][0]
+
+        exp = await client.post(f"/api/v1/valuations/{val_id}/expenses", json={
+            "category": "amortized_capital", "base_year_amount": "30000", "growth_rate_pct": "0",
+            "is_recoverable": True, "is_memo": True,
+        })
+        assert exp.status_code == 201, exp.text
+        assert exp.json()["is_memo"] is True
+        cf = (await client.post(f"/api/v1/valuations/{val_id}/run")).json()["annual_cash_flows"][0]
+        # Not deducted: operating expenses only move by the % of EGI fee on the added recoveries
+        assert "amortized_capital" not in cf["expense_detail"]
+        assert float(cf["expense_recoveries"]) > float(base_cf["expense_recoveries"])
+        fee_change = float(cf["expense_detail"]["management_fee"]) - float(base_cf["expense_detail"]["management_fee"])
+        assert abs(float(cf["operating_expenses"]) - float(base_cf["operating_expenses"]) - fee_change) < 0.01
+
+    async def test_memo_rejected_on_pct_of_egi_line(self, client: AsyncClient):
+        ids = await _setup_office_property(client)
+        val_id = ids["setup_valuation_id"]
+        bad = await client.post(f"/api/v1/valuations/{val_id}/expenses", json={
+            "category": "asset_fee", "base_year_amount": "0", "is_pct_of_egi": True, "pct_of_egi": "0.01",
+            "is_memo": True,
+        })
+        assert bad.status_code == 422
+        expenses = (await client.get(f"/api/v1/valuations/{val_id}/expenses")).json()
+        fee_id = next(e["id"] for e in expenses if e["is_pct_of_egi"])
+        upd = await client.put(f"/api/v1/valuations/{val_id}/expenses/{fee_id}", json={"is_memo": True})
+        assert upd.status_code == 422
+
+
 class TestUponExpirationApi:
     async def test_lease_options_and_mla_chain(self, client: AsyncClient):
         ids = await _setup_office_property(client)

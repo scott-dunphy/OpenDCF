@@ -457,7 +457,7 @@ class ImportService:
                 growth_schedule=e.growth_schedule,
                 is_recoverable=e.is_recoverable, is_gross_up_eligible=e.is_gross_up_eligible,
                 gross_up_vacancy_pct=e.gross_up_vacancy_pct, is_pct_of_egi=e.is_pct_of_egi,
-                pct_of_egi=e.pct_of_egi,
+                pct_of_egi=e.pct_of_egi, is_memo=e.is_memo,
             ))
         for oi in ip.other_income:
             self.db.add(PropertyOtherIncome(

@@ -265,6 +265,9 @@ class ExpenseInput:
     # > 0 = amount is stated at 100% occupancy and the variable share scales with occupancy.
     variable_pct: Decimal = Decimal(0)
     amount_schedule: tuple[Decimal, ...] = ()   # explicit annual dollars; later years grow from the last at the growth rate
+    # Memo line (e.g. amortized capital billed to tenants): recoveries can include it, but it is not
+    # deducted as an operating expense. Applies to fixed-amount lines only.
+    is_memo: bool = False
 
 
 @dataclass(frozen=True)

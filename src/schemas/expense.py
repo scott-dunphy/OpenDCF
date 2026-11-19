@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 STANDARD_EXPENSE_CATEGORIES = (
     "real_estate_taxes",
@@ -56,6 +56,17 @@ class PropertyExpenseBase(BaseModel):
         default=None, ge=0, le=1,
         description="For management fee: express as % of EGI instead of fixed amount"
     )
+    is_memo: bool = Field(
+        default=False,
+        description="Memo line (e.g. amortized capital billed to tenants): recoverable but not deducted as an "
+                    "operating expense. Not allowed on a % of EGI line.",
+    )
+
+    @model_validator(mode="after")
+    def _memo_not_pct_of_egi(self):
+        if self.is_memo and self.is_pct_of_egi:
+            raise ValueError("A % of EGI line cannot be a memo line")
+        return self
 
 
 class PropertyExpenseCreate(PropertyExpenseBase):
@@ -86,6 +97,7 @@ class PropertyExpenseUpdate(BaseModel):
     gross_up_vacancy_pct: Decimal | None = Field(default=None, ge=0, le=1)
     is_pct_of_egi: bool | None = None
     pct_of_egi: Decimal | None = Field(default=None, ge=0, le=1)
+    is_memo: bool | None = None
 
 
 class PropertyExpenseRead(PropertyExpenseBase):

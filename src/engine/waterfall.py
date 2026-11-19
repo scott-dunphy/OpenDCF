@@ -174,7 +174,8 @@ def build_annual_waterfall(
     fee_lines = _pct_of_egi_lines(expenses)
     if occupancy_by_month is None:
         occupancy_by_month = compute_occupancy_by_month(suite_slices, suites, analysis)
-    non_egi_expenses = [e for e in expenses if not e.is_pct_of_egi]
+    # Memo lines are recovered from tenants (expense_engine) but are not operating expenses
+    non_egi_expenses = [e for e in expenses if not e.is_pct_of_egi and not e.is_memo]
     suite_area_map = {s.suite_id: s.area for s in suites}
     suite_name_map = {s.suite_id: s.suite_name for s in suites}
     suite_type_map = {s.suite_id: s.space_type for s in suites}

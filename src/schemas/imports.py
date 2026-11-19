@@ -86,6 +86,7 @@ class ImportedExpense(BaseModel):
     gross_up_vacancy_pct: Decimal | None = None
     is_pct_of_egi: bool = False
     pct_of_egi: Decimal | None = None
+    is_memo: bool = False
 
 
 class ImportedOtherIncome(BaseModel):

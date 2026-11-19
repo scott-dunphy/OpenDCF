@@ -32,6 +32,8 @@ class PropertyExpense(Base, UUIDPrimaryKey, TimestampMixin):
     is_recoverable: Mapped[bool] = mapped_column(Boolean, default=True)
     is_gross_up_eligible: Mapped[bool] = mapped_column(Boolean, default=False)
     gross_up_vacancy_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))  # e.g. 0.95
+    # Memo line: recoverable from tenants but not deducted as an operating expense
+    is_memo: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Management fee: can be expressed as % of EGI instead of fixed amount
     is_pct_of_egi: Mapped[bool] = mapped_column(Boolean, default=False)
