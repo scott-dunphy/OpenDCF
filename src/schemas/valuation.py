@@ -130,6 +130,20 @@ class ValuationBase(BaseModel):
     exit_deduct_forward_capital: bool = Field(
         default=False, description="Deduct Year N+1 TI/LC/capex from net sale proceeds"
     )
+    exit_add_back_free_rent: bool = Field(
+        default=False, description="Add the capitalized year's free rent back to the exit NOI"
+    )
+    exit_deduct_forward_free_rent: bool = Field(
+        default=False, description="Deduct Year N+1 free rent from net sale proceeds"
+    )
+    exit_deduct_forward_leasing_costs: bool = Field(
+        default=False,
+        description="Deduct Year N+1 TI/LC (not capex) from net sale proceeds; "
+                    "TI/LC is deducted once when forward capital is also deducted",
+    )
+    exit_costs_on_adjusted_gross: bool = Field(
+        default=False, description="Calculate exit costs on gross sale value less the forward deductions"
+    )
 
     # Marina-specific assumptions (JSON string)
     marina_assumptions_json: str | None = None
@@ -217,6 +231,10 @@ class ValuationUpdate(BaseModel):
     acquisition_costs_pct: Decimal | None = Field(default=None, ge=0, lt=1)
     direct_cap_rate: Decimal | None = Field(default=None, gt=0, lt=1)
     exit_deduct_forward_capital: bool | None = None
+    exit_add_back_free_rent: bool | None = None
+    exit_deduct_forward_free_rent: bool | None = None
+    exit_deduct_forward_leasing_costs: bool | None = None
+    exit_costs_on_adjusted_gross: bool | None = None
     marina_assumptions_json: str | None = None
     seniors_housing_assumptions_json: str | None = None
     self_storage_assumptions_json: str | None = None

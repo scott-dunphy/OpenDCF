@@ -89,6 +89,10 @@ class Valuation(Base, UUIDPrimaryKey, TimestampMixin):
     acquisition_costs_pct: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal("0"))
     direct_cap_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     exit_deduct_forward_capital: Mapped[bool] = mapped_column(default=False)
+    exit_add_back_free_rent: Mapped[bool] = mapped_column(default=False)
+    exit_deduct_forward_free_rent: Mapped[bool] = mapped_column(default=False)
+    exit_deduct_forward_leasing_costs: Mapped[bool] = mapped_column(default=False)
+    exit_costs_on_adjusted_gross: Mapped[bool] = mapped_column(default=False)
 
     # === Results (populated after engine run) ===
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

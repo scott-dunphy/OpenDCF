@@ -317,6 +317,12 @@ class ValuationParams:
     loan_fees_pct: Decimal = Decimal(0)          # of loan amount, paid at close
     direct_cap_rate: Decimal | None = None       # applied to Year 1 NOI
     exit_deduct_forward_capital: bool = False    # deduct Year N+1 TI/LC/capex from sale
+    # Terminal value adjustments (published DCF software resale adjustments). Free rent and
+    # TI/LC come from the year whose NOI is capitalized (Year N+1 when exit_cap_year == -1).
+    exit_add_back_free_rent: bool = False            # add free rent to the capitalized NOI
+    exit_deduct_forward_free_rent: bool = False      # deduct Year N+1 free rent from sale
+    exit_deduct_forward_leasing_costs: bool = False  # deduct Year N+1 TI/LC (no capex) from sale
+    exit_costs_on_adjusted_gross: bool = False       # selling costs on gross less those deductions
     # General vacancy is a target for total vacancy; modeled downtime/absorption counts toward it
     reduce_general_vacancy_by_downtime: bool = False
     # Capital reserves grow at this rate from Year 1

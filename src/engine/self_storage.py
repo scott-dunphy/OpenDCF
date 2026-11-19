@@ -331,12 +331,15 @@ def run_self_storage(
     monthly_cfs = rows[:analysis.num_months]
     _, debt_balances, debt_balloons = build_debt_schedule_detail(params, hold_years, analysis.num_months)
 
-    forward_noi, forward_capital = None, ZERO
+    forward_noi, forward_capital, forward_free_rent = None, ZERO, ZERO
     if len(extended_annual) > hold_years:
         forward = extended_annual[hold_years]
         forward_noi = forward.net_operating_income
         forward_capital = -forward.building_improvements
-    terminal = calculate_terminal_value_breakdown(annual_cfs, params, forward_noi, forward_capital)
+        forward_free_rent = -forward.free_rent
+    terminal = calculate_terminal_value_breakdown(
+        annual_cfs, params, forward_noi, forward_capital, forward_year_free_rent=forward_free_rent,
+    )
     terminal_value = terminal.net_value
 
     monthly = params.discounting_convention == "monthly"

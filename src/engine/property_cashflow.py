@@ -969,10 +969,13 @@ def run_valuation(
 
     # Step 6: Terminal value
     forward_noi = _estimate_forward_noi(annual_cfs, expenses, market_assumptions, suites)
-    forward_capital = Decimal(0)
+    forward_capital = forward_leasing = forward_free_rent = Decimal(0)
     # A terminal NOI override replaces the forward NOI; the extended run is then only
-    # needed for the Year N+1 capital deduction.
-    needs_extended = params.terminal_noi_override is None or params.exit_deduct_forward_capital
+    # needed for the Year N+1 deductions.
+    needs_extended = (
+        params.terminal_noi_override is None or params.exit_deduct_forward_capital
+        or params.exit_deduct_forward_leasing_costs or params.exit_deduct_forward_free_rent
+    )
     if params.exit_cap_year == -1 and needs_extended and _use_extended_forward_noi and annual_cfs:
         # For terminal value, use explicit NOI from Year (Hold + 1), not a growth proxy.
         # Extend the run by 12 months and take the first additional annual NOI.
@@ -1005,7 +1008,11 @@ def run_valuation(
             fwd = extended.annual_cash_flows[len(annual_cfs)]
             forward_noi = fwd.net_operating_income
             forward_capital = -(fwd.tenant_improvements + fwd.leasing_commissions + fwd.building_improvements)
-    terminal = calculate_terminal_value_breakdown(annual_cfs, params, forward_noi, forward_capital)
+            forward_leasing = -(fwd.tenant_improvements + fwd.leasing_commissions)
+            forward_free_rent = -fwd.free_rent
+    terminal = calculate_terminal_value_breakdown(
+        annual_cfs, params, forward_noi, forward_capital, forward_leasing, forward_free_rent,
+    )
     terminal_value = terminal.net_value
 
     # Step 7: DCF discounting → NPV

@@ -165,25 +165,35 @@ def calculate_terminal_value_breakdown(
     params: ValuationParams,
     forward_year_noi: Decimal | None = None,
     forward_year_capital: Decimal = Decimal(0),
+    forward_year_leasing_costs: Decimal = Decimal(0),
+    forward_year_free_rent: Decimal = Decimal(0),
 ) -> TerminalValueBreakdown:
     """
     Build terminal value components:
-      gross = NOI / exit_cap_rate
+      gross = NOI (+ free rent addback) / exit_cap_rate
       net = gross - exit_costs - transfer_tax - capital_deduction
 
     forward_year_capital is the (positive) Year N+1 TI/LC/building improvement
     spend; it is deducted only when params.exit_deduct_forward_capital is set.
+    forward_year_leasing_costs (TI/LC only) and forward_year_free_rent are positive
+    Year N+1 amounts for the granular adjustments. capital_deduction is the total of
+    the forward deductions applied; TI/LC is deducted once when both capital flags are
+    set. With exit_costs_on_adjusted_gross, exit costs apply to gross less that total.
+    The free rent addback does not apply to a terminal NOI override.
     """
+    free_rent = Decimal(0)
     if params.terminal_noi_override is not None:
         noi = params.terminal_noi_override
     elif params.exit_cap_year == -1:
         noi = forward_year_noi if forward_year_noi is not None else annual_cfs[-1].net_operating_income
+        free_rent = forward_year_free_rent
     else:
         idx = params.exit_cap_year - 1
-        if 0 <= idx < len(annual_cfs):
-            noi = annual_cfs[idx].net_operating_income
-        else:
-            noi = annual_cfs[-1].net_operating_income
+        row = annual_cfs[idx] if 0 <= idx < len(annual_cfs) else annual_cfs[-1]
+        noi = row.net_operating_income
+        free_rent = -row.free_rent
+    if params.exit_add_back_free_rent:
+        noi += free_rent
 
     if params.exit_cap_rate == Decimal(0):
         return TerminalValueBreakdown(
@@ -195,13 +205,20 @@ def calculate_terminal_value_breakdown(
         )
 
     gross_value = noi / params.exit_cap_rate
-    exit_costs = gross_value * params.exit_costs_pct
+    capital_deduction = Decimal(0)
+    if params.exit_deduct_forward_capital:
+        capital_deduction = forward_year_capital
+    elif params.exit_deduct_forward_leasing_costs:
+        capital_deduction = forward_year_leasing_costs
+    if params.exit_deduct_forward_free_rent:
+        capital_deduction += forward_year_free_rent
+    cost_base = gross_value - capital_deduction if params.exit_costs_on_adjusted_gross else gross_value
+    exit_costs = cost_base * params.exit_costs_pct
     transfer_tax = calculate_transfer_tax_amount(
         gross_sale_price=gross_value,
         preset_code=params.transfer_tax_preset,
         custom_rate=params.transfer_tax_custom_rate,
     )
-    capital_deduction = forward_year_capital if params.exit_deduct_forward_capital else Decimal(0)
     net_value = gross_value - exit_costs - transfer_tax - capital_deduction
     return TerminalValueBreakdown(
         noi_basis=noi,

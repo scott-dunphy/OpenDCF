@@ -1182,6 +1182,10 @@ class ValuationService:
             ),
             direct_cap_rate=v.direct_cap_rate,
             exit_deduct_forward_capital=bool(v.exit_deduct_forward_capital),
+            exit_add_back_free_rent=bool(v.exit_add_back_free_rent),
+            exit_deduct_forward_free_rent=bool(v.exit_deduct_forward_free_rent),
+            exit_deduct_forward_leasing_costs=bool(v.exit_deduct_forward_leasing_costs),
+            exit_costs_on_adjusted_gross=bool(v.exit_costs_on_adjusted_gross),
             reduce_general_vacancy_by_downtime=bool(v.reduce_general_vacancy_by_downtime),
             vacancy_calculation_frequency=v.vacancy_calculation_frequency or "annual",
             vacancy_on_gross_revenue=bool(v.vacancy_on_gross_revenue),
@@ -1967,7 +1971,12 @@ class ValuationService:
         cent = Decimal("0.01")
         monthly = params.discounting_convention == "monthly"
         # Unlevered IRR only: the loan does not affect it
-        unlevered = replace(params, loan_amount=None, additional_loans=(), terminal_noi_override=result.terminal_noi_basis)
+        # The run's capitalized NOI and total forward deductions are applied as they are
+        unlevered = replace(
+            params, loan_amount=None, additional_loans=(), terminal_noi_override=result.terminal_noi_basis,
+            exit_deduct_forward_capital=True, exit_deduct_forward_leasing_costs=False,
+            exit_deduct_forward_free_rent=False, exit_add_back_free_rent=False,
+        )
         terminals: list[Decimal] = []
         irrs: list[Decimal | None] = []
         for cap in exit_caps:

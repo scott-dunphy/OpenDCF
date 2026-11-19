@@ -941,6 +941,25 @@ class TestPurchasePriceReturns:
         resp = await client.get(f"/api/v1/valuations/{val.json()['id']}/reports/sensitivity")
         assert resp.status_code == 400
 
+    async def test_terminal_value_adjustments_round_trip(self, client: AsyncClient):
+        ids = await _setup_office_property(client)
+        flags = ("exit_add_back_free_rent", "exit_deduct_forward_free_rent",
+                 "exit_deduct_forward_leasing_costs", "exit_costs_on_adjusted_gross")
+        val = await client.post(f"/api/v1/properties/{ids['property_id']}/valuations", json={
+            "name": "Adjusted", "discount_rate": "0.08", "exit_cap_rate": "0.065", "exit_costs_pct": "0.02",
+        })
+        val_id = val.json()["id"]
+        assert not any(val.json()[f] for f in flags)
+        edited = await client.put(f"/api/v1/valuations/{val_id}", json={f: True for f in flags})
+        assert all(edited.json()[f] for f in flags)
+
+        km = (await client.post(f"/api/v1/valuations/{val_id}/run")).json()["key_metrics"]
+        gross = float(km["terminal_gross_value"])
+        deduction = float(km["terminal_capital_deduction_amount"])
+        assert abs(float(km["terminal_exit_costs_amount"]) - (gross - deduction) * 0.02) < 0.05
+        sens = (await client.get(f"/api/v1/valuations/{val_id}/reports/sensitivity")).json()
+        assert abs(float(sens["values"][2][2]) - float(km["npv"])) < 0.01
+
 
 class TestGrowthScheduleValuation:
     async def test_expense_schedule_changes_results(self, client: AsyncClient):
