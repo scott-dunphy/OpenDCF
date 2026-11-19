@@ -709,3 +709,59 @@ class TestTotalRentBasis:
                                    frequency="monthly"), rent_basis="total")
         slices = project_lease_cash_flows(lease, make_analysis(months=12))
         assert sum(s.base_rent for s in slices) == Decimal("18000")
+
+
+class TestProratedRentSteps:
+    """prorate_rent_steps: a mid-month step splits the month by days."""
+
+    def _lease(self, step_date, prorate=True, start=date(2025, 1, 1), free_rent_periods=()):
+        from dataclasses import replace
+
+        lease = make_lease(
+            start=start, end=date(2027, 12, 31), rent=Decimal("24.00"), area=Decimal("1000"),
+            escalation_type="fixed_step",
+            rent_steps=(RentStepInput(effective_date=step_date, rent_per_unit=Decimal("36.00")),),
+            free_rent_periods=free_rent_periods,
+        )
+        return replace(lease, prorate_rent_steps=prorate)
+
+    def _month(self, lease, year, month):
+        slices = project_lease_cash_flows(lease, make_analysis(months=36))
+        return next(s for s in slices if s.period_start == date(year, month, 1))
+
+    def test_jan_15_step_prorates_by_days(self):
+        """$2,000/month before, $3,000 after: Jan = 2,000 x 14/31 + 3,000 x 17/31."""
+        s = self._month(self._lease(date(2026, 1, 15)), 2026, 1)
+        expected = Decimal(2000) * 14 / 31 + Decimal(3000) * 17 / 31
+        assert abs(s.base_rent - expected) < Decimal("1e-9")
+        assert abs(s.effective_rent - expected) < Decimal("1e-9")
+        assert self._month(self._lease(date(2026, 1, 15)), 2026, 2).base_rent == Decimal(3000)
+        assert self._month(self._lease(date(2026, 1, 15)), 2025, 12).base_rent == Decimal(2000)
+
+    def test_step_on_first_unchanged(self):
+        on = project_lease_cash_flows(self._lease(date(2026, 1, 1)), make_analysis(months=36))
+        off = project_lease_cash_flows(self._lease(date(2026, 1, 1), prorate=False), make_analysis(months=36))
+        assert [(s.base_rent, s.free_rent_adjustment, s.effective_rent) for s in on] == \
+               [(s.base_rent, s.free_rent_adjustment, s.effective_rent) for s in off]
+
+    def test_flag_off_keeps_step_at_next_month(self):
+        lease = self._lease(date(2026, 1, 15), prorate=False)
+        assert self._month(lease, 2026, 1).base_rent == Decimal(2000)
+        assert self._month(lease, 2026, 2).base_rent == Decimal(3000)
+
+    def test_step_inside_partial_first_month(self):
+        """Lease starts Jan 10, steps Jan 20: 10 days at $2,000/mo + 12 days at $3,000/mo, over 31."""
+        lease = self._lease(date(2025, 1, 20), start=date(2025, 1, 10))
+        s = self._month(lease, 2025, 1)
+        expected = Decimal(2000) * 10 / 31 + Decimal(3000) * 12 / 31
+        assert abs(s.base_rent - expected) < Decimal("1e-9")
+        assert s.month_fraction == Decimal(22) / Decimal(31)
+
+    def test_step_in_free_rent_month(self):
+        """Free Jan 1-20 with a Jan 15 step abates 14 days at the old rent and 6 at the new."""
+        free = (FreeRentPeriodInput(start_date=date(2026, 1, 1), end_date=date(2026, 1, 20),
+                                    applies_to_base_rent=True, applies_to_recoveries=False),)
+        s = self._month(self._lease(date(2026, 1, 15), free_rent_periods=free), 2026, 1)
+        assert abs(s.base_rent - Decimal(79000) / 31) < Decimal("1e-9")
+        assert abs(s.free_rent_adjustment - Decimal(-46000) / 31) < Decimal("1e-9")
+        assert abs(s.effective_rent - Decimal(3000) * 11 / 31) < Decimal("1e-9")

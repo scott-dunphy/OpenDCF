@@ -7,7 +7,7 @@ expense_engine.py) or TI/LC for speculative leases (handled by renewal_engine.py
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from src.engine.date_utils import (
@@ -114,6 +114,37 @@ def _free_rent_factor(
     return Decimal(str(free_days)) / Decimal(str(total_days))
 
 
+def _prorated_step_rent(
+    lease: LeaseInput,
+    period_start: date,
+    period_end: date,
+) -> tuple[Decimal, Decimal]:
+    """
+    Fixed-step rent for one month, split at rent-step dates inside the lease's active days.
+
+    Each segment earns its step's monthly rent x segment days / days in month, and free rent
+    abates the segment's free days at that segment's rent. Returns (base rent, free rent adjustment).
+    """
+    active_start = max(period_start, lease.start_date)
+    active_end = min(period_end, lease.end_date)
+    month_days = Decimal(str((period_end - period_start).days + 1))
+    cuts = sorted({s.effective_date for s in lease.rent_steps if active_start < s.effective_date <= active_end})
+
+    rent = Decimal(0)
+    free = Decimal(0)
+    for seg_start, next_start in zip([active_start, *cuts], [*cuts, active_end + timedelta(days=1)]):
+        seg_end = next_start - timedelta(days=1)
+        seg_pct = Decimal(str((next_start - seg_start).days)) / month_days
+        rate = _current_rent(lease, seg_start, Decimal(0))
+        if lease.rent_payment_frequency == "monthly":
+            seg_rent = rate * lease.rent_area * seg_pct
+        else:
+            seg_rent = rate * lease.rent_area / Decimal(12) * seg_pct
+        rent += seg_rent
+        free += seg_rent * _free_rent_factor(lease.free_rent_periods, seg_start, seg_end, for_base_rent=True)
+    return rent, -free
+
+
 def project_lease_cash_flows(
     lease: LeaseInput,
     analysis: AnalysisPeriod,
@@ -163,6 +194,10 @@ def project_lease_cash_flows(
             lease_end=lease.end_date,
         )
         free_rent_adj = -monthly_rent * free_base_factor
+
+        if lease.prorate_rent_steps and lease.escalation_type == "fixed_step":
+            # Mid-month steps: split the month at step dates and prorate rent and free rent by days
+            monthly_rent, free_rent_adj = _prorated_step_rent(lease, period_start, period_end)
 
         effective = monthly_rent + free_rent_adj
 

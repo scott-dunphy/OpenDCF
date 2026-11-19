@@ -181,6 +181,10 @@ class LeaseBase(BaseModel):
         default=True,
         description="published DCF software 'Exclude upon rollover': off carries the exclusion to the market leases that follow.",
     )
+    prorate_rent_steps: bool = Field(
+        default=False,
+        description="Fixed-step leases: a mid-month step splits that month by days instead of starting next month.",
+    )
     upon_expiration: UponExpiration = Field(
         default=UponExpiration.MARKET,
         description="market (probability blend), renew, vacate, option (contract option), reabsorb (stays vacant)",
@@ -244,6 +248,7 @@ class LeaseUpdate(BaseModel):
     renewal_rent_spread_pct: Decimal | None = None
     exclude_from_general_vacancy: bool | None = None
     vacancy_exclusion_ends_at_rollover: bool | None = None
+    prorate_rent_steps: bool | None = None
     upon_expiration: UponExpiration | None = None
     option_rent_per_unit: Decimal | None = Field(default=None, gt=0)
     option_term_months: int | None = Field(default=None, ge=1)

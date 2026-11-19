@@ -1013,6 +1013,7 @@ class ValuationService:
             projected_annual_sales_per_sf=lease.projected_annual_sales_per_sf,
             exclude_from_general_vacancy=bool(lease.exclude_from_general_vacancy),
             vacancy_exclusion_ends_at_rollover=lease.vacancy_exclusion_ends_at_rollover is not False,
+            prorate_rent_steps=bool(lease.prorate_rent_steps),
             upon_expiration=lease.upon_expiration or "market",
             option_rent_per_unit=lease.option_rent_per_unit,
             option_term_months=lease.option_term_months,

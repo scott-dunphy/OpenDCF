@@ -87,6 +87,14 @@ class TestLeaseCRUD:
         assert resp.status_code == 200
         assert resp.json()["base_rent_per_unit"] == "35.00"
 
+    async def test_prorate_rent_steps_defaults_off_and_updates(self, client: AsyncClient):
+        _, suite_id = await _create_suite(client)
+        lease = await _create_lease(client, suite_id, escalation_type="fixed_step")
+        assert lease["prorate_rent_steps"] is False
+        resp = await client.put(f"/api/v1/leases/{lease['id']}", json={"prorate_rent_steps": True})
+        assert resp.status_code == 200
+        assert resp.json()["prorate_rent_steps"] is True
+
     async def test_update_lease_rejects_null_required_field(self, client: AsyncClient):
         _, suite_id = await _create_suite(client)
         lease_id = (await _create_lease(client, suite_id))["id"]

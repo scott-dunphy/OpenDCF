@@ -106,6 +106,8 @@ class LeaseInput:
     # published DCF software "Exclude upon rollover": the exclusion ends when the lease expires; False carries it
     # to the market leases that follow in the suite
     vacancy_exclusion_ends_at_rollover: bool = True
+    # fixed_step only: a mid-month step splits the month by days instead of starting next month
+    prorate_rent_steps: bool = False
     # What happens at expiry: market (probability blend), renew, vacate, option, reabsorb
     upon_expiration: str = "market"
     option_rent_per_unit: Decimal | None = None  # None = market rent x (1 + renewal spread)

@@ -71,6 +71,8 @@ class Lease(Base, UUIDPrimaryKey, TimestampMixin):
     exclude_from_general_vacancy: Mapped[bool] = mapped_column(Boolean, default=False)
     # published DCF software "Exclude upon rollover": off carries the exclusion to the market leases that follow
     vacancy_exclusion_ends_at_rollover: Mapped[bool] = mapped_column(Boolean, default=True)
+    # fixed_step only: a mid-month step splits the month by days instead of starting next month
+    prorate_rent_steps: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Upon expiration (market | renew | vacate | option | reabsorb) and option terms
     upon_expiration: Mapped[str] = mapped_column(String(20), default="market")
