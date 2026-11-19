@@ -64,3 +64,28 @@ async def test_bulk_update_clears_a_field_sent_as_null_and_keeps_omitted_ones(cl
     (stored,) = (await client.get(f"/api/v1/leases/{lease['id']}")).json()["expense_recovery_overrides"]
     assert stored["expense_stop_per_sf"] is None
     assert float(stored["admin_fee_pct"]) == 0.1 and float(stored["cap_per_sf_annual"]) == 9
+
+
+async def test_lease_override_recoverable_pct_weights_recovery_and_is_copied(client: AsyncClient):
+    ids = await _setup_office_property(client)
+    val, _ = await _valuation_and_profile(client, ids)
+    lease = next(l for l in (await client.get(f"{V}/{val}/leases")).json() if l["tenant_id"])
+    r = await client.post(f"/api/v1/leases/{lease['id']}/expense-recoveries", json={
+        "expense_category": "cam", "recovery_type": "nnn"})
+    assert r.status_code == 201 and float(r.json()["recoverable_pct"]) == 1, r.text
+    full = await _total_recoveries(client, val)
+
+    r = await client.patch("/api/v1/leases/expense-recoveries/bulk", json={"updates": [{
+        "lease_id": lease["id"], "override_id": r.json()["id"],
+        "fields": {"expense_category": "cam", "recovery_type": "nnn", "recoverable_pct": "0.5"}}]})
+    assert r.status_code == 200 and r.json()["upserted_count"] == 1, r.text
+    half = await _total_recoveries(client, val)
+    assert half < full
+
+    copy = (await client.post(f"{V}/{val}/duplicate")).json()["id"]
+    copied_lease = next(l for l in (await client.get(f"{V}/{copy}/leases")).json() if l["tenant_id"])
+    (copied,) = (await client.get(f"/api/v1/leases/{copied_lease['id']}")).json()["expense_recovery_overrides"]
+    assert float(copied["recoverable_pct"]) == 0.5
+    assert await _total_recoveries(client, copy) == half
+    assert (await client.post(f"/api/v1/leases/{lease['id']}/expense-recoveries", json={
+        "expense_category": "taxes", "recovery_type": "nnn", "recoverable_pct": "1.5"})).status_code == 422

@@ -148,6 +148,8 @@ class LeaseExpenseRecovery(Base, UUIDPrimaryKey):
     cap_growth_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     # Modified gross: this category alone recovers its $/SF above this stop
     expense_stop_per_sf: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    # Share of the category's expense that is recoverable, before the stop, share and cap/floor
+    recoverable_pct: Mapped[Decimal] = mapped_column(Numeric(10, 6), default=Decimal(1), server_default="1")
     comment: Mapped[str | None] = mapped_column(Text)
 
     lease: Mapped["Lease"] = relationship(back_populates="expense_recovery_overrides")

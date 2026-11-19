@@ -73,6 +73,9 @@ class ExpenseRecoveryOverride:
     cap_growth_pct: Decimal | None = None
     # Modified gross: this category alone recovers its $/SF above this stop
     expense_stop_per_sf: Decimal | None = None
+    # Share of the category's expense (after gross-up and pool deductions) that is recoverable, before
+    # the stop, pro rata share and cap/floor (e.g. 0.6 recovers 60% of janitorial)
+    recoverable_pct: Decimal = Decimal(1)
 
 
 @dataclass(frozen=True)

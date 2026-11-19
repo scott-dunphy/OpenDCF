@@ -53,6 +53,7 @@ async def create_recovery_structure(
             cap_group=item_data.cap_group,
             cap_growth_pct=item_data.cap_growth_pct,
             expense_stop_per_sf=item_data.expense_stop_per_sf,
+            recoverable_pct=item_data.recoverable_pct,
             comment=item_data.comment,
         ))
     db.add(rs)
@@ -168,6 +169,7 @@ async def add_item(
         cap_group=body.cap_group,
         cap_growth_pct=body.cap_growth_pct,
         expense_stop_per_sf=body.expense_stop_per_sf,
+        recoverable_pct=body.recoverable_pct,
         comment=body.comment,
     )
     db.add(item)

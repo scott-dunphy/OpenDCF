@@ -961,6 +961,7 @@ class ValuationService:
                 cap_group=o.cap_group,
                 cap_growth_pct=o.cap_growth_pct,
                 expense_stop_per_sf=o.expense_stop_per_sf,
+                recoverable_pct=o.recoverable_pct,
             )
         overrides = tuple(overrides_by_cat.values())
         # Get tenant name via relationship (may be None for vacant/spec)
@@ -1043,6 +1044,7 @@ class ValuationService:
                 cap_group=item.cap_group,
                 cap_growth_pct=item.cap_growth_pct,
                 expense_stop_per_sf=item.expense_stop_per_sf,
+                recoverable_pct=item.recoverable_pct,
             )
             for item in structure.items
         )

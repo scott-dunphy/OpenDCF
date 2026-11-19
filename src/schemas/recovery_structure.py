@@ -23,6 +23,9 @@ class RecoveryStructureItemBase(BaseModel):
     expense_stop_per_sf: Decimal | None = Field(
         default=None, ge=0, description="Modified gross: recovers expense $/SF/yr above this stop",
     )
+    recoverable_pct: Decimal = Field(
+        default=Decimal(1), ge=0, le=1, description="Share of the category's expense (after gross-up and pool deductions) that is recoverable, applied before the stop, pro rata share and cap/floor (e.g. 0.6 recovers 60%)",
+    )
     comment: str | None = None
 
 

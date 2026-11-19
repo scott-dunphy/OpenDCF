@@ -148,6 +148,12 @@ def _effective_recovery_type(lease: LeaseInput, expense_category: str) -> str:
     return override.recovery_type if override else lease.recovery_type
 
 
+def _recoverable_pct(lease: LeaseInput, expense_category: str) -> Decimal:
+    """The recoverable % of a category's eligible expense (its override's, else 100%)."""
+    override = next((o for o in lease.recovery_overrides if o.expense_category == expense_category), None)
+    return override.recoverable_pct if override else Decimal(1)
+
+
 def _has_stop_reference(lease: LeaseInput, expense_category: str) -> bool:
     """Whether a base-year stop line has a stop to measure against: a base-year date, or an explicit
     stop amount on the lease or on the category's override."""
@@ -186,7 +192,9 @@ def _recovery_for_expense(
     """
     Compute the annual recovery amount for one expense line item for one lease.
     Applies the lease's recovery_type (or per-category override).
-    base_year_expense(exp, year_number): the expense a base year in the analysis incurred, if known.
+    annual_expense_grossed: the eligible expense, already weighted by the override's recoverable %.
+    base_year_expense(exp, year_number): the expense a base year in the analysis incurred, if known
+    (unweighted: a stop derived from the expense is weighted here; an entered stop amount is not).
     """
     # Check for per-category override
     override = next(
@@ -250,6 +258,9 @@ def _recovery_for_expense(
                 base_stop = _annual_expense(exp, 1) / (Decimal(1) + year1_rate) ** abs(year_offset)
         else:
             base_stop = _annual_expense(exp, 1)
+        if override and override.base_year_stop_amount is None and lease.base_year_stop_amount is None:
+            # A stop derived from the base year's expense is weighted like the expense it is compared to
+            base_stop *= override.recoverable_pct
         base_stop_used = base_stop
         excess = max(Decimal(0), annual_expense_grossed - base_stop)
         recovery = excess * pro_rata
@@ -326,6 +337,8 @@ def _pool_base_year_stops(computed, lease: LeaseInput) -> None:
     `base_year_stop_amount` is the pooled stop; otherwise the lines' own stops are summed.
     A line whose override sets its own stop or type is measured alone; an override that only adds
     a cap, floor or admin fee keeps its line in the pool and applies those to the line's share.
+    A line's recoverable % weights its contribution to the pool (its expense and any stop derived
+    from its base year); a lease-level stop amount is not weighted.
     """
     overrides = {o.expense_category: o for o in lease.recovery_overrides}
     rows = [i for i, (exp, _, _, _, meta) in enumerate(computed)
@@ -435,7 +448,9 @@ def _apply_group_caps(computed, lease, group_caps, recovery_year, base_recovery_
 
             def share_at(i: int, year: int) -> Decimal:
                 if computed[i][0].is_pct_of_egi:  # a base-year lease's fee row
-                    return computed[i][4]["pro_rata_share_pct"] * fee_in(computed[i][0].category, year, base_share)
+                    category = computed[i][0].category
+                    return (computed[i][4]["pro_rata_share_pct"] * _recoverable_pct(lease, category)
+                            * fee_in(category, year, base_share))
                 return base_share(i, year)
 
             now = sum((share_now(computed[i]) for i in rows), Decimal(0))
@@ -637,6 +652,12 @@ def attach_expense_recoveries(
         if e.is_recoverable and e.is_pct_of_egi and e.pct_of_egi is not None:
             category_pct[e.category] = category_pct.get(e.category, Decimal(0)) + e.pct_of_egi
 
+    def weight(exp: ExpenseInput) -> Decimal:
+        """The line's recoverable %: weights its eligible expense (after gross-up and pool deductions),
+        and a net % of EGI line's share, before the stop, pro rata share and cap/floor."""
+        o = overrides.get(exp.category)
+        return o.recoverable_pct if o else Decimal(1)
+
     def line_fraction(exp: ExpenseInput) -> Decimal:
         """This line's part of its category's fee (several % of EGI lines can share a category)."""
         total = category_pct.get(exp.category, Decimal(0))
@@ -703,12 +724,13 @@ def attach_expense_recoveries(
                         admin = o.admin_fee_pct if o and o.admin_fee_pct is not None else Decimal(0)
                         fee_shares[exp.category] = (
                             lease.pro_rata_share if lease.pro_rata_share is not None
-                            else lease.area / denom if denom > 0 else Decimal(0)) * (Decimal(1) + admin)
+                            else lease.area / denom if denom > 0 else Decimal(0)) * (Decimal(1) + admin) \
+                            * weight(exp)
                     continue
                 if fee_type == "base_year_stop" and fee_by_year and _has_stop_reference(lease, exp.category):
                     # The fee's increase over the base year, once the fee by year is known. Without a
                     # base-year date the explicit stop amount sets the stop; year 1 is the reference.
-                    fee = fee_in(exp, key, actual_occupancy)
+                    fee = fee_in(exp, key, actual_occupancy) * weight(exp)
                     base_year = lease.base_year if lease.base_year is not None else analysis.start_date.year
                     base_key = (base_year if calendar_year_recoveries
                                 else base_year - analysis.start_date.year + 1)
@@ -722,7 +744,7 @@ def attach_expense_recoveries(
                 if fee_type != "modified_gross" or not fee_by_year:
                     continue
                 # Modified gross: the fee is in the pool measured against the stop, like the lines below
-                fee_grossed = fee_in(exp, key, actual_occupancy)
+                fee_grossed = fee_in(exp, key, actual_occupancy) * weight(exp)
                 exp_calc_inputs.append((
                     exp, fee_by_year.get(exp.category, {}).get(key, Decimal(0)) * line_fraction(exp), fee_grossed,
                     fee_type))
@@ -736,7 +758,7 @@ def attach_expense_recoveries(
             else:
                 stated_exp = _annual_expense(exp, year_number)
             annual_exp = occupancy_adjusted_expense(stated_exp, exp, actual_occupancy)
-            annual_exp_grossed = recoverable(exp, stated_exp, actual_occupancy, key)
+            annual_exp_grossed = recoverable(exp, stated_exp, actual_occupancy, key) * weight(exp)
             eff_recovery_type = _effective_recovery_type(lease, exp.category)
             exp_calc_inputs.append((exp, annual_exp, annual_exp_grossed, eff_recovery_type))
             if eff_recovery_type == "modified_gross" and not leaves_pool(exp):
@@ -785,7 +807,7 @@ def attach_expense_recoveries(
             def recovery_in(exp: ExpenseInput, year: int) -> Decimal:
                 stated = (_calendar_year_expense(exp, analysis, year) if calendar_year_recoveries
                           else _expense_any_year(exp, year))
-                grossed = recoverable(exp, stated, actual_occupancy, year, occupancy_key=key)
+                grossed = recoverable(exp, stated, actual_occupancy, year, occupancy_key=key) * weight(exp)
                 return _recovery_for_expense(lease, exp, grossed, denominator(exp, year), year_number,
                                              analysis.start_date.year, base_year_expense=base_year_expense)[0]
 
@@ -804,7 +826,7 @@ def attach_expense_recoveries(
                 exp = row[0]
                 stated = (_calendar_year_expense(exp, analysis, year) if calendar_year_recoveries
                           else _expense_any_year(exp, year))
-                return share_of(exp, recoverable(exp, stated, actual_occupancy, year, occupancy_key=key),
+                return share_of(exp, recoverable(exp, stated, actual_occupancy, year, occupancy_key=key) * weight(exp),
                                 denominator(exp, year),
                                 row[4]["recovery_type"])
 
@@ -875,8 +897,9 @@ def attach_expense_recoveries(
             )
 
             if recovery_audit is not None:
-                gross_up_factor = (  # before any pool deduction
-                    ((annual_exp_grossed + deduction(exp, recovery_key)) / annual_exp)
+                w = weight(exp)  # the expense after gross-up is shown at its recoverable %
+                gross_up_factor = (  # before any pool deduction and recoverable %
+                    (((annual_exp_grossed / w if w > 0 else Decimal(0)) + deduction(exp, recovery_key)) / annual_exp)
                     if annual_exp > Decimal(0) else Decimal(1)
                 )
                 gross_up_reference = (stabilized_occupancy_pct if stabilized_occupancy_pct is not None
